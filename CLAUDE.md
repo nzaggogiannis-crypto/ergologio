@@ -15,5 +15,5 @@ Back-office web app της ΔΥΡΑΣ ΤΕΧΝΙΚΗ ΟΕ. Ζωντανή σελ
 - `src/config.json`: Firebase config, email ιδιοκτήτη (`nzaggogiannis@gmail.com`), βάση `(default)`.
 - `firestore.rules`: αντίγραφο των κανόνων που έχουν μπει στο Firebase console (project `ergologio-dyras`). Αν αλλάξουν, ο χρήστης τους επικολλά στο console → Firestore → Rules.
 - Ρόλοι: ιδιοκτήτης (το email παραπάνω) · πλήρης πρόσβαση (`meta/access.full[uid]`) · εργαζόμενος (όλοι οι άλλοι, συνδέονται μέσω αιτήματος `pending/<uid>`).
-- Δεδομένα: `meta/*`, `inv/<έργο>_<ΕΕΕΕ-ΜΜ>`, `sal/…`, `thr/…`, `att/<ΕΕΕΕ-ΜΜ>-a|b`, `car/<id>_<ΕΕΕΕ>`, `shared/catalog`, `staff/<uid>`, `pending/<uid>/{items,days}`.
+- Δεδομένα: `meta/*`, `inv/<έργο>_<ΕΕΕΕ-ΜΜ>`, `sal/…`, `thr/…`, `att/<ΕΕΕΕ-ΜΜ>-a|b`, `car/<id>_<ΕΕΕΕ>`, `shared/catalog`, `staff/<uid>`, `pending/<uid>/{items,days}`, `meta/files` (λίστα αρχείων/φακέλων) + `fblob/<id>_<n>` (περιεχόμενο PDF σε base64 κομμάτια 700 KB).
 - Η ανάγνωση PDF με AI είναι προς το παρόν απενεργοποιημένη (χρειάζεται δικό της API key / backend).

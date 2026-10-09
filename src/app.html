@@ -119,6 +119,10 @@
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 17H3.5a1 1 0 01-1-1v-3a1 1 0 01.8-1l3.2-.6 2.6-3.1A2 2 0 0110.6 7.6h4.6a2 2 0 011.5.7l2.9 3.4 1.6.5a1 1 0 01.7 1V16a1 1 0 01-1 1H19"/><path d="M9 17h6"/><path d="M6.5 11.4h13.2M12.5 7.6v3.8"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
         <span class="whitespace-nowrap md:hidden">Αυτοκ.</span><span class="whitespace-nowrap hidden md:inline">Αυτοκίνητα</span>
       </button>
+      <button class="nav-btn" data-nav="files" onclick="go('files')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        <span class="whitespace-nowrap">Αρχεία</span>
+      </button>
       <button class="nav-btn relative" data-nav="notif" onclick="go('notif')">
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
         <span class="whitespace-nowrap md:hidden">Ειδοπ.</span><span class="whitespace-nowrap hidden md:inline">Ειδοποιήσεις</span>
@@ -440,6 +444,7 @@ function refreshViews() {   // ανανεώνει μόνο πίνακες/σύν
   if (ui.view === 'data' && !busyIn('#accessPanel')) renderAccess();
   if (ui.view === 'dashboard') { renderKpis(); if (!busyIn('#dashTable')) renderDashTable(); }
   if (ui.view === 'notif') $('#main').innerHTML = notifHTML();
+  if (ui.view === 'files' && !$('#modal').classList.contains('flex')) $('#main').innerHTML = filesHTML();
   if (ui.view === 'suppliers' && !busyIn('#supTable')) renderSuppliers();
   if (ui.view === 'customers' && !busyIn('#custTable')) renderCustomers();
   if (ui.view === 'cars') renderCars();
@@ -538,7 +543,7 @@ function docsFromState(st) {
 /* Αντικαθιστά ΟΛΑ τα δεδομένα (demo, επαναφορά, μηδενισμός) με μπάρα προόδου. */
 async function replaceAll(st, label, doneMsg) {
   const next = docsFromState(st), ops = [];
-  Object.keys(docs).forEach(p => { if (!(p in next) && !['meta/links', 'meta/backup', 'meta/access'].includes(p)) ops.push({ kind: 'del', path: p }); });
+  Object.keys(docs).forEach(p => { if (!(p in next) && !['meta/links', 'meta/backup', 'meta/access', 'meta/files'].includes(p)) ops.push({ kind: 'del', path: p }); });
   Object.entries(next).forEach(([p, b]) => ops.push({ kind: 'set', path: p, body: b }));
   modalLocked = true;
   openModal(`<h3 class="text-lg font-bold mb-1">${esc(label)}</h3>
@@ -723,6 +728,7 @@ function render() {
   if (ui.view === 'labor') { m.innerHTML = laborHTML(); renderWorkers(); renderLaborSummary(); }
   if (ui.view === 'data') { m.innerHTML = dataHTML(); renderDataCounts(); renderAccess(); }
   if (ui.view === 'notif') { m.innerHTML = notifHTML(); }
+  if (ui.view === 'files') { m.innerHTML = filesHTML(); }
 }
 function pageHeader(title, sub, right = '') {
   return (navStack.length ? `<button class="text-sm font-semibold text-slate-500 hover:text-slate-900 mb-3 inline-flex items-center gap-1" onclick="goBack()">‹ Πίσω</button>` : '') +
@@ -2440,9 +2446,55 @@ function tollsSection(y) {
 function carsHTML() {
   return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `<button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-primary" onclick="carModal()">＋ Προσθήκη αυτοκινήτου</button>`) + `<div id="carsBody"></div>`;
 }
+/* Θεωρητικό κόστος μεταφοράς (από τα έργα) έναντι πραγματικών εξόδων αυτοκινήτων + διοδίων */
+function transportCompare(y) {
+  const rows = state.projects.map(p => { const t = transportCost(p, state.attendance.filter(a => a.projectId === p.id), y); return { p, ...t }; })
+    .filter(r => r.days || r.carCost || r.ferryCost || r.airCost);
+  const theo = rows.reduce((s, r) => s + r.carCost, 0), tickets = rows.reduce((s, r) => s + r.ferryCost + r.airCost, 0);
+  const ex = state.carExp.filter(e => e.date.startsWith(y));
+  const by = t => ex.filter(e => e.type === t).reduce((s, e) => s + e.amount, 0);
+  const real = { fuel: by('fuel'), toll: by('toll'), service: by('service'), kteo: by('kteo'), ins: by('ins'), other: by('other') };
+  real.total = Object.values(real).reduce((s, v) => s + v, 0);
+  return { rows, theo, tickets, real, noPrice: rows.filter(r => r.days && !r.carPrice) };
+}
+function compareSection(y) {
+  const c = transportCompare(y), diff = c.theo - c.real.total, over = diff < 0, max = Math.max(c.theo, c.real.total, 1);
+  const pct = v => Math.round(v / max * 100);
+  const yrs = [...new Set([today().slice(0, 4), ...state.carExp.map(e => e.date.slice(0, 4)), ...state.attendance.map(a => a.date.slice(0, 4))])].sort().reverse();
+  const realRows = [['Καύσιμα', c.real.fuel], ['Διόδια', c.real.toll], ['Service', c.real.service], ['ΚΤΕΟ', c.real.kteo], ['Ασφάλειες', c.real.ins], ['Άλλα', c.real.other]].filter(([, v]) => v);
+  return `<section class="card p-5 md:p-6 mb-6 fade-in">
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <h3 class="font-bold text-lg">Κόστος μεταφοράς · θεωρητικό ή πραγματικό</h3>
+      <select class="inp !w-auto !py-1.5 ml-auto" onchange="ui.carYear=this.value;renderCars()">${yrs.map(v => `<option ${v === y ? 'selected' : ''}>${v}</option>`).join('')}</select>
+    </div>
+    <div class="grid md:grid-cols-3 gap-4">
+      <div class="rounded-xl bg-sky-50 border border-sky-200 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-sky-800">Θεωρητικό (έργα)</div>
+        <div class="text-2xl font-extrabold tabular-nums mt-1">${fmt.format(c.theo)}</div><div class="text-xs text-sky-800/80 mt-1">τιμή αμαξιού × αμάξια ανά μέρα σε κάθε έργο</div></div>
+      <div class="rounded-xl bg-slate-50 border border-slate-200 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-slate-600">Πραγματικό (έξοδα)</div>
+        <div class="text-2xl font-extrabold tabular-nums mt-1">${fmt.format(c.real.total)}</div><div class="text-xs text-slate-500 mt-1">καύσιμα, διόδια, service, ΚΤΕΟ, ασφάλειες</div></div>
+      <div class="rounded-xl ${over ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'} border p-4"><div class="text-xs font-semibold uppercase tracking-wide ${over ? 'text-rose-700' : 'text-emerald-700'}">${over ? 'Είμαστε έξω' : 'Είμαστε μέσα'}</div>
+        <div class="text-2xl font-extrabold tabular-nums mt-1 ${over ? 'text-rose-700' : 'text-emerald-700'}">${over ? '−' : '+'}${fmt.format(Math.abs(diff))}</div>
+        <div class="text-xs ${over ? 'text-rose-700/80' : 'text-emerald-700/80'} mt-1">${c.theo ? `το πραγματικό είναι ${Math.round(c.real.total / c.theo * 100)}% του θεωρητικού` : 'δεν υπάρχει θεωρητικό κόστος για αυτό το έτος'}</div></div>
+    </div>
+    <div class="mt-5 space-y-2">
+      <div class="flex items-center gap-3 text-sm"><span class="w-24 shrink-0 text-slate-600">Θεωρητικό</span><div class="flex-1 h-3 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full bg-sky-500" style="width:${pct(c.theo)}%"></div></div></div>
+      <div class="flex items-center gap-3 text-sm"><span class="w-24 shrink-0 text-slate-600">Πραγματικό</span><div class="flex-1 h-3 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full ${over ? 'bg-rose-500' : 'bg-slate-700'}" style="width:${pct(c.real.total)}%"></div></div></div>
+    </div>
+    <div class="grid lg:grid-cols-2 gap-5 mt-6">
+      <div><div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Θεωρητικό ανά έργο</div>
+        ${c.rows.filter(r => r.days).length ? `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="tbl w-full text-sm"><thead><tr><th>Έργο</th><th class="num">Μέρες</th><th class="num">Αμάξια</th><th class="num">Ποσό</th></tr></thead><tbody>
+          ${c.rows.filter(r => r.days).sort((a, b) => b.carCost - a.carCost).map(r => `<tr class="cursor-pointer hover:bg-slate-50" onclick="openProject('${r.p.id}')"><td>${dot(r.p.color, 2)} ${esc(r.p.name)}${r.carPrice ? '' : ' <span class="text-[11px] text-amber-700 font-semibold">χωρίς τιμή αμαξιού</span>'}</td><td class="num">${r.days}</td><td class="num">${r.cars}</td><td class="num font-semibold">${fmt.format(r.carCost)}</td></tr>`).join('')}
+          </tbody></table></div>` : '<p class="text-sm text-slate-400">Δεν υπάρχουν μέρες εργασίας για αυτό το έτος.</p>'}
+        ${c.noPrice.length ? `<p class="text-xs text-amber-700 mt-2">${c.noPrice.length} ${c.noPrice.length === 1 ? 'έργο δεν έχει' : 'έργα δεν έχουν'} τιμή αμαξιού, άρα το θεωρητικό τους μετράει 0. Βάλε την από την καρτέλα του έργου → Μεταφορά.</p>` : ''}
+        ${c.tickets ? `<p class="text-xs text-slate-500 mt-2">Ακτοπλοϊκά/αεροπορικά των έργων (${fmt.format(c.tickets)}) δεν μπαίνουν στη σύγκριση, γιατί δεν αφορούν τα αυτοκίνητα.</p>` : ''}</div>
+      <div><div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Πραγματικό ανά είδος</div>
+        ${realRows.length ? `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="tbl w-full text-sm"><tbody>${realRows.map(([l, v]) => `<tr><td>${l}</td><td class="num font-semibold">${fmt.format(v)}</td></tr>`).join('')}
+          <tr class="bg-slate-50"><td class="font-bold">Σύνολο</td><td class="num font-extrabold">${fmt.format(c.real.total)}</td></tr></tbody></table></div>` : '<p class="text-sm text-slate-400">Δεν υπάρχουν έξοδα αυτοκινήτων για αυτό το έτος.</p>'}</div>
+    </div></section>`;
+}
 function renderCars() {
   const el = $('#carsBody'); if (!el) return;
-  if (!state.cars.length) { el.innerHTML = tollsSection(today().slice(0, 4)).replace('mt-6', 'mb-6') + `<div class="card p-10 text-center"><div class="text-slate-400 text-sm mb-3">Δεν υπάρχουν αυτοκίνητα.</div><button class="btn btn-primary" onclick="carModal()">＋ Πρόσθεσε το πρώτο</button></div>`; return; }
+  if (!state.cars.length) { el.innerHTML = compareSection(ui.carYear || today().slice(0, 4)) + tollsSection(today().slice(0, 4)).replace('mt-6', 'mb-6') + `<div class="card p-10 text-center"><div class="text-slate-400 text-sm mb-3">Δεν υπάρχουν αυτοκίνητα.</div><button class="btn btn-primary" onclick="carModal()">＋ Πρόσθεσε το πρώτο</button></div>`; return; }
   const y = today().slice(0, 4), ex = state.carExp.filter(e => e.date.startsWith(y) && e.carId !== EPASS), tl = tolls().filter(e => e.date.startsWith(y)).reduce((s, e) => s + e.amount, 0);
   const fuel = ex.filter(e => e.type === 'fuel'), other = ex.filter(e => e.type !== 'fuel');
   const al = carAlerts();
@@ -2457,6 +2509,7 @@ function renderCars() {
       ${card('Σύνολο ' + y, fmt.format(ex.reduce((s, e) => s + e.amount, 0) + tl), `${state.cars.length} οχήματα + διόδια`)}
       <div class="col-span-2 lg:col-span-1 grid">${card('Λήξεις (30 ημέρες)', al.length, al.length ? 'δες παραπάνω' : 'όλα εντάξει')}</div>
     </div>
+    ${compareSection(ui.carYear || y)}
     <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${state.cars.map(c => {
       const ce = ex.filter(e => e.carId === c.id), f = ce.filter(e => e.type === 'fuel');
       return `<button class="card p-5 text-left hover:shadow-md transition fade-in" onclick="openCar('${c.id}')">
@@ -2761,6 +2814,155 @@ function notifPopup() {
       <div><h3 class="text-lg font-bold">Ειδοποιήσεις</h3><p class="text-sm text-slate-500">${list.length} ${list.length === 1 ? 'νέα ειδοποίηση' : 'νέες ειδοποιήσεις'}</p></div></div>
     <div class="space-y-2 mb-5">${list.map(x => notifRow(x, false, true)).join('')}</div>
     <div class="flex justify-end gap-2"><button class="btn btn-ghost" onclick="closeModal();go('notif')">Όλες</button><button class="btn btn-primary" onclick="notifMarkSeen(notifUnseen());closeModal();render()">✓ Το είδα</button></div>`);
+}
+
+/* ============ ΑΡΧΕΙΑ (μόνο PDF, σε φακέλους) ============
+   Λίστα φακέλων/αρχείων: meta/files { folders:{id:{name,parent}}, items:{id:{name,folder,size,at,parts}} }
+   Περιεχόμενο: fblob/<id>_<n> { d: base64 } σε κομμάτια των 700 KB (όριο εγγράφου 1 MB). Δεν μπαίνει στο αντίγραφο .json. */
+const FILE_MAX = 25 * 1024 * 1024, FILE_PART = 700000, FILE_QUOTA = 1024 * 1024 * 1024;
+const filesDoc = () => docs['meta/files'] || {};
+const fFolders = () => Object.entries(filesDoc().folders || {}).filter(([, v]) => v && v.name).map(([id, v]) => ({ id, name: v.name, parent: v.parent || '' }));
+const fItems = () => Object.entries(filesDoc().items || {}).filter(([, v]) => v && v.name).map(([id, v]) => ({ id, ...v, folder: v.folder || '' }));
+const fSize = n => n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toLocaleString('el-GR', { maximumFractionDigits: 1 })} MB`;
+const fPath = id => { const out = []; const all = Object.fromEntries(fFolders().map(f => [f.id, f])); let c = all[id], g = 0; while (c && g++ < 30) { out.unshift(c); c = all[c.parent]; } return out; };
+function fDescendants(id) { const all = fFolders(), out = new Set([id]); let grew = true; while (grew) { grew = false; all.forEach(f => { if (out.has(f.parent) && !out.has(f.id)) { out.add(f.id); grew = true; } }); } return out; }
+function filesHTML() {
+  if (mode !== 'cloud') return pageHeader('Αρχεία', 'PDF σε φακέλους') + '<div class="card p-8 text-sm text-slate-500">Τα αρχεία λειτουργούν μόνο όταν η εφαρμογή είναι συνδεδεμένη με τη βάση.</div>';
+  const cur = ui.fileFolder && fFolders().some(f => f.id === ui.fileFolder) ? ui.fileFolder : '';
+  const q = norm(ui.fileSearch || ''), items = fItems(), used = items.reduce((s, f) => s + (+f.size || 0), 0);
+  const folders = q ? [] : fFolders().filter(f => f.parent === cur).sort((a, b) => a.name.localeCompare(b.name, 'el'));
+  const files = (q ? items.filter(f => norm(f.name).includes(q)) : items.filter(f => f.folder === cur)).sort((a, b) => (b.at || 0) - (a.at || 0));
+  const count = id => { const ds = fDescendants(id); return items.filter(f => ds.has(f.folder)).length; };
+  const crumbs = [{ id: '', name: 'Αρχεία' }, ...fPath(cur)];
+  const ico = '<svg class="w-9 h-9 shrink-0" viewBox="0 0 24 24" fill="#fef3c7" stroke="#d97706" stroke-width="1.6"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
+  const pdf = '<span class="w-9 h-9 shrink-0 rounded-lg bg-rose-50 text-rose-600 text-[10px] font-extrabold flex items-center justify-center border border-rose-200">PDF</span>';
+  return pageHeader('Αρχεία', 'Αποθήκευση PDF σε φακέλους · συμβάσεις, άδειες, μελέτες, πιστοποιήσεις',
+      `<button class="btn btn-ghost" onclick="folderModal()">＋ Φάκελος</button><label class="btn btn-primary cursor-pointer">⬆ Ανέβασμα PDF<input type="file" accept="application/pdf,.pdf" multiple class="hidden" onchange="uploadFiles(this.files);this.value=''"></label>`) + `
+  <section class="card fade-in" ondragover="event.preventDefault();this.classList.add('ring-2','ring-amber-400')" ondragleave="this.classList.remove('ring-2','ring-amber-400')" ondrop="event.preventDefault();this.classList.remove('ring-2','ring-amber-400');uploadFiles(event.dataTransfer.files)">
+    <div class="p-4 border-b border-slate-100 flex flex-wrap items-center gap-2">
+      <nav class="flex flex-wrap items-center gap-1 text-sm min-w-0 flex-1">${crumbs.map((c, i) => i === crumbs.length - 1 ? `<b class="text-slate-900 truncate">${esc(c.name)}</b>` : `<button class="text-slate-500 hover:text-slate-900 hover:underline truncate" onclick="ui.fileFolder='${c.id}';ui.fileSearch='';render()">${esc(c.name)}</button><span class="text-slate-300">›</span>`).join('')}</nav>
+      <input id="fSearch" class="inp !w-56 !py-1.5" placeholder="🔍 Αναζήτηση σε όλα" value="${esc(ui.fileSearch || '')}" oninput="ui.fileSearch=this.value;clearTimeout(window.__fsT);window.__fsT=setTimeout(()=>{render();const i=$('#fSearch');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},250)">
+    </div>
+    <div id="fileProg"></div>
+    ${!folders.length && !files.length ? `<div class="p-10 text-center text-sm text-slate-400">${q ? 'Κανένα αρχείο δεν ταιριάζει.' : 'Ο φάκελος είναι άδειος. Σύρε εδώ αρχεία PDF ή πάτα «Ανέβασμα PDF».'}</div>` : `<div class="divide-y divide-slate-100">
+      ${folders.map(f => `<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50">
+        <button class="flex items-center gap-3 flex-1 min-w-0 text-left" onclick="ui.fileFolder='${f.id}';render()">${ico}<span class="min-w-0"><span class="block font-semibold truncate">${esc(f.name)}</span><span class="block text-xs text-slate-400">${count(f.id)} αρχεία</span></span></button>
+        <button class="text-slate-400 hover:text-slate-900 px-1.5" title="Μετονομασία" onclick="folderModal('${f.id}')">✎</button>
+        <button class="text-slate-400 hover:text-rose-600 px-1.5" title="Διαγραφή" onclick="delFolder('${f.id}')">🗑</button></div>`).join('')}
+      ${files.map(f => `<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50">
+        <button class="flex items-center gap-3 flex-1 min-w-0 text-left" onclick="openFile('${f.id}')">${pdf}<span class="min-w-0"><span class="block font-semibold truncate">${esc(f.name)}</span>
+          <span class="block text-xs text-slate-400">${fSize(+f.size || 0)} · ${f.at ? dmy(iso(new Date(f.at))) : ''}${q && f.folder ? ' · 📁 ' + esc(fPath(f.folder).map(x => x.name).join(' › ')) : ''}</span></span></button>
+        <button class="text-slate-400 hover:text-slate-900 px-1.5" title="Λήψη" onclick="openFile('${f.id}',true)">⬇</button>
+        <button class="text-slate-400 hover:text-slate-900 px-1.5" title="Μετονομασία / μετακίνηση" onclick="fileModal('${f.id}')">✎</button>
+        <button class="text-slate-400 hover:text-rose-600 px-1.5" title="Διαγραφή" onclick="delFile('${f.id}')">🗑</button></div>`).join('')}
+    </div>`}
+    <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1"><span>${items.length} αρχεία · ${fSize(used)} από ${fSize(FILE_QUOTA)} δωρεάν χώρο</span><span>Μόνο PDF, έως ${fSize(FILE_MAX)} το καθένα.</span></div>
+  </section>`;
+}
+function folderModal(id) {
+  const f = id ? fFolders().find(x => x.id === id) : null;
+  openModal(`<h3 class="text-lg font-bold mb-4">${f ? 'Μετονομασία φακέλου' : 'Νέος φάκελος'}</h3>
+    <form class="space-y-3.5" onsubmit="event.preventDefault();saveFolder('${id || ''}')">
+      <div><label class="lbl" for="fdName">Όνομα</label><input id="fdName" class="inp" required maxlength="80" value="${f ? esc(f.name) : ''}" placeholder="π.χ. Συμβάσεις"></div>
+      <div class="flex gap-2 justify-end"><button type="button" class="btn btn-ghost" onclick="closeModal()">Άκυρο</button><button class="btn btn-primary">Αποθήκευση</button></div>
+    </form>`);
+  setTimeout(() => $('#fdName') && $('#fdName').focus(), 50);
+}
+function saveFolder(id) {
+  const name = $('#fdName').value.trim().replace(/\s+/g, ' '); if (!name) return;
+  const fid = id || uid();
+  commit([M('meta/files', { folders: { [fid]: id ? { name } : { name, parent: ui.fileFolder || '' } } })]);
+  closeModal(); render(); toast(id ? '✓ Ο φάκελος μετονομάστηκε' : `✓ Δημιουργήθηκε ο φάκελος «${name}»`);
+}
+function delFolder(id) {
+  const f = fFolders().find(x => x.id === id); if (!f) return;
+  const ds = fDescendants(id), inside = fItems().filter(x => ds.has(x.folder));
+  confirmModal({ title: `Διαγραφή φακέλου «${esc(f.name)}»;`, ok: 'Διαγραφή', danger: true,
+    body: inside.length ? `<p>Ο φάκελος περιέχει <b>${inside.length}</b> αρχεία (μαζί με τους υποφακέλους). Θα σβηστούν οριστικά.</p>` : '<p>Ο φάκελος είναι άδειος.</p>',
+    check: inside.length ? 'Καταλαβαίνω ότι τα αρχεία θα σβηστούν οριστικά.' : '',
+    onOk: async () => {
+      for (const x of inside) await removeBlobs(x);
+      commit([M('meta/files', { folders: Object.fromEntries([...ds].map(k => [k, null])), items: Object.fromEntries(inside.map(x => [x.id, null])) })]);
+      if (ds.has(ui.fileFolder)) ui.fileFolder = f.parent || '';
+      render(); toast('Ο φάκελος διαγράφηκε', 'warn');
+    } });
+}
+async function uploadFiles(list) {
+  const all = [...(list || [])]; if (!all.length) return;
+  const ok = [], bad = [];
+  for (const f of all) {
+    const head = new Uint8Array(await f.slice(0, 5).arrayBuffer());
+    const isPdf = String.fromCharCode(...head) === '%PDF-';
+    if (!isPdf) bad.push(`${f.name}: δεν είναι PDF`); else if (f.size > FILE_MAX) bad.push(`${f.name}: πάνω από ${fSize(FILE_MAX)}`); else ok.push(f);
+  }
+  if (bad.length) toast('Δεν ανέβηκαν: ' + bad.join(' · '), 'err');
+  const used = fItems().reduce((s, x) => s + (+x.size || 0), 0);
+  if (used + ok.reduce((s, f) => s + f.size, 0) > FILE_QUOTA) return toast('Δεν υπάρχει αρκετός ελεύθερος χώρος· σβήσε παλιά αρχεία', 'err');
+  const folder = ui.fileFolder || '';
+  let done = 0;
+  for (const f of ok) {
+    const prog = $('#fileProg');
+    if (prog) prog.innerHTML = `<div class="px-4 py-2 bg-amber-50 text-sm text-amber-900 border-b border-amber-200">⬆ Ανέβασμα ${done + 1}/${ok.length}: <b>${esc(f.name)}</b>… <span id="fpPct">0%</span></div>`;
+    const id = uid(), buf = new Uint8Array(await f.arrayBuffer()), parts = Math.ceil(buf.length / FILE_PART) || 1;
+    try {
+      for (let i = 0; i < parts; i++) {
+        const chunk = buf.subarray(i * FILE_PART, (i + 1) * FILE_PART);
+        let bin = ''; for (let j = 0; j < chunk.length; j += 0x8000) bin += String.fromCharCode.apply(null, chunk.subarray(j, j + 0x8000));
+        await db.doc(`fblob/${id}_${i}`).set({ d: btoa(bin) });
+        const pc = $('#fpPct'); if (pc) pc.textContent = Math.round((i + 1) / parts * 100) + '%';
+      }
+      commit([M('meta/files', { items: { [id]: { name: f.name.replace(/\.pdf$/i, '') + '.pdf', folder, size: f.size, at: Date.now(), parts } } })]);
+      done++;
+    } catch (e) {
+      for (let i = 0; i < parts; i++) db.doc(`fblob/${id}_${i}`).delete().catch(() => {});
+      toast(`Το «${f.name}» δεν ανέβηκε (${(e && e.code) || 'σφάλμα'})`, 'err');
+    }
+  }
+  const prog = $('#fileProg'); if (prog) prog.innerHTML = '';
+  if (done) { render(); toast(`✓ Ανέβηκαν ${done} ${done === 1 ? 'αρχείο' : 'αρχεία'}`); }
+}
+async function fileBlob(f) {
+  const parts = [];
+  for (let i = 0; i < (+f.parts || 1); i++) {
+    const s = await db.doc(`fblob/${f.id}_${i}`).get();
+    if (!s.exists) throw new Error('missing part');
+    const b = atob(s.data().d), u = new Uint8Array(b.length); for (let j = 0; j < b.length; j++) u[j] = b.charCodeAt(j);
+    parts.push(u);
+  }
+  return new Blob(parts, { type: 'application/pdf' });
+}
+async function openFile(id, download) {
+  const f = fItems().find(x => x.id === id); if (!f) return;
+  const w = download ? null : window.open('', '_blank');
+  if (w) w.document.write('<p style="font-family:sans-serif;padding:20px;color:#64748b">Άνοιγμα αρχείου…</p>');
+  toast('Φόρτωση αρχείου…');
+  try {
+    const url = URL.createObjectURL(await fileBlob(f));
+    if (w) w.location.href = url;
+    else { const a = document.createElement('a'); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { if (w) w.close(); toast('Το αρχείο δεν άνοιξε· έλεγξε τη σύνδεση', 'err'); }
+}
+function fileModal(id) {
+  const f = fItems().find(x => x.id === id); if (!f) return;
+  const opts = [{ id: '', label: 'Αρχεία (κεντρικός φάκελος)' }, ...fFolders().map(x => ({ id: x.id, label: fPath(x.id).map(y => y.name).join(' › ') })).sort((a, b) => a.label.localeCompare(b.label, 'el'))];
+  openModal(`<h3 class="text-lg font-bold mb-4">Αρχείο</h3>
+    <form class="space-y-3.5" onsubmit="event.preventDefault();saveFile('${id}')">
+      <div><label class="lbl" for="fiName">Όνομα</label><input id="fiName" class="inp" required maxlength="120" value="${esc(f.name.replace(/\.pdf$/i, ''))}"></div>
+      <div><label class="lbl" for="fiFolder">Φάκελος</label><select id="fiFolder" class="inp">${opts.map(o => `<option value="${o.id}" ${o.id === f.folder ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>
+      <div class="flex gap-2 justify-end"><button type="button" class="btn btn-ghost" onclick="closeModal()">Άκυρο</button><button class="btn btn-primary">Αποθήκευση</button></div>
+    </form>`);
+}
+function saveFile(id) {
+  const name = $('#fiName').value.trim(); if (!name) return;
+  commit([M('meta/files', { items: { [id]: { name: name.replace(/\.pdf$/i, '') + '.pdf', folder: $('#fiFolder').value } } })]);
+  closeModal(); render(); toast('✓ Αποθηκεύτηκε');
+}
+async function removeBlobs(f) { for (let i = 0; i < (+f.parts || 1); i++) { try { await db.doc(`fblob/${f.id}_${i}`).delete(); } catch (e) {} } }
+function delFile(id) {
+  const f = fItems().find(x => x.id === id); if (!f) return;
+  confirmModal({ title: `Διαγραφή «${esc(f.name)}»;`, ok: 'Διαγραφή', danger: true, body: '<p>Το αρχείο σβήνεται οριστικά από όλες τις συσκευές.</p>',
+    onOk: async () => { commit([M('meta/files', { items: { [id]: null } })]); render(); await removeBlobs(f); toast('Το αρχείο διαγράφηκε', 'warn'); } });
 }
 
 /* ============ ΗΜΕΡΟΛΟΓΙΟ (πίνακας μέρες × εργαζόμενοι, όπως στο Excel) ============ */
