@@ -114,3 +114,19 @@ onAuthStateChanged(auth, u => {
 });
 const syncNet = () => { try { setSync(); } catch (e) {} };
 addEventListener('online', syncNet); addEventListener('offline', syncNet);
+
+/* ---------- Διάγνωση: αν η σελίδα κολλήσει στη «Φόρτωση», γράφει την αιτία στην οθόνη ---------- */
+const diag = [];
+const showDiag = why => {
+  const m = document.getElementById('main'); if (!m || window.booted === true) return;
+  if (!/Φόρτωση δεδομένων/.test(m.textContent) && !document.getElementById('fbDiag')) return;
+  m.innerHTML = `<div id="fbDiag" class="card p-6 max-w-xl border-rose-200"><h2 class="text-lg font-extrabold text-rose-700">Η φόρτωση δεν ολοκληρώθηκε</h2>
+    <p class="text-sm text-slate-600 mt-2">${why}</p>
+    <pre class="mt-3 text-xs bg-slate-50 rounded-lg p-3 whitespace-pre-wrap break-all text-slate-700">${diag.slice(-8).join('\n').replace(/[<>&]/g, '') || '(κανένα μήνυμα)'}</pre>
+    <p class="text-xs text-slate-500 mt-3">Στείλε στιγμιότυπο αυτής της οθόνης. Λογαριασμός: ${(me && me.email) || '—'}</p>
+    <div class="flex gap-2 mt-4"><button class="btn btn-primary" onclick="location.reload()">Ξαναδοκίμασε</button><button class="btn btn-ghost" onclick="fbSignOut()">Αποσύνδεση</button></div></div>`;
+};
+addEventListener('error', e => { diag.push('error: ' + (e.message || e.error)); showDiag('Παρουσιάστηκε σφάλμα στη σελίδα.'); });
+addEventListener('unhandledrejection', e => { const r = e.reason; diag.push('rejection: ' + ((r && (r.code || '')) + ' ' + ((r && r.message) || r))); showDiag('Παρουσιάστηκε σφάλμα στη σελίδα.'); });
+window.__diag = diag;
+setTimeout(() => showDiag(navigator.onLine ? 'Πέρασαν 25 δευτερόλεπτα χωρίς να έρθουν τα δεδομένα.' : 'Δεν υπάρχει σύνδεση στο ίντερνετ.'), 25000);

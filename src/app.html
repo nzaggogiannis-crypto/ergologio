@@ -418,6 +418,7 @@ function afterSnap(key) {
 }
 function listen(path, isDoc) {
   const onErr = e => {
+    (window.__diag || []).push('listen ' + path + ': ' + ((e && e.code) || '') + ' ' + ((e && e.message) || ''));
     if (e && e.code === 'unavailable') { setTimeout(() => listen(path, isDoc), 3000); return; }
     setSync('error'); toast(`Ο συγχρονισμός σταμάτησε (${(e && e.code) || 'σφάλμα'}). Άνοιξε ξανά τη σελίδα.`, 'err');
     loaded.add(path); if (!booted && loaded.size >= 6) boot();
@@ -3640,7 +3641,7 @@ const directWrite = (kind, path, body) => enqueue({ kind, path, body });
 function listenExtra(path, isDoc, onData, onFirst) {
   let first = true;
   const ok = data => { onData(data); if (first) { first = false; onFirst && onFirst(); } };
-  const err = e => { if (e && e.code === 'unavailable') setTimeout(() => listenExtra(path, isDoc, onData, onFirst), 3000); else if (first) { first = false; onFirst && onFirst(); } };
+  const err = e => { (window.__diag || []).push('listen ' + path + ': ' + ((e && e.code) || '') + ' ' + ((e && e.message) || '')); if (e && e.code === 'unavailable') setTimeout(() => listenExtra(path, isDoc, onData, onFirst), 3000); else if (first) { first = false; onFirst && onFirst(); } };
   if (isDoc) return db.doc(path).onSnapshot(s => ok(s.exists ? s.data() : null), err);
   return db.collection(path).onSnapshot(qs => { const m = {}; qs.docs.forEach(d => { if (d.exists) m[d.id] = d.data(); }); ok(m); }, err);
 }
@@ -4142,7 +4143,7 @@ function withdrawEmpInvoice(id) {
 function boot() {
   if (booted) return;
   booted = true; setSync();
-  go(ui.view);
+  go(ui.view); window.booted = true;
   if (role === 'owner') { updateNavBadge(); scheduleStaffSync(); setTimeout(notifPopup, 600); }
 }
 async function init() {
