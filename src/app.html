@@ -2444,7 +2444,7 @@ function tollsSection(y) {
   </section>`;
 }
 function carsHTML() {
-  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `<button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-primary" onclick="carModal()">＋ Προσθήκη αυτοκινήτου</button>`) + `<div id="carsBody"></div>`;
+  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `<button class="btn btn-ghost" onclick="compareModal()">📊 Σύγκριση & συμπεράσματα</button><button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-primary" onclick="carModal()">＋ Προσθήκη αυτοκινήτου</button>`) + `<div id="carsBody"></div>`;
 }
 /* Θεωρητικό κόστος μεταφοράς (από τα έργα) έναντι πραγματικών εξόδων αυτοκινήτων + διοδίων */
 function transportCompare(y) {
@@ -2462,10 +2462,10 @@ function compareSection(y) {
   const pct = v => Math.round(v / max * 100);
   const yrs = [...new Set([today().slice(0, 4), ...state.carExp.map(e => e.date.slice(0, 4)), ...state.attendance.map(a => a.date.slice(0, 4))])].sort().reverse();
   const realRows = [['Καύσιμα', c.real.fuel], ['Διόδια', c.real.toll], ['Service', c.real.service], ['ΚΤΕΟ', c.real.kteo], ['Ασφάλειες', c.real.ins], ['Άλλα', c.real.other]].filter(([, v]) => v);
-  return `<section class="card p-5 md:p-6 mb-6 fade-in">
-    <div class="flex flex-wrap items-center gap-3 mb-4">
+  return `<div>
+    <div class="flex flex-wrap items-center gap-3 mb-4 pr-8">
       <h3 class="font-bold text-lg">Κόστος μεταφοράς · θεωρητικό ή πραγματικό</h3>
-      <select class="inp !w-auto !py-1.5 ml-auto" onchange="ui.carYear=this.value;renderCars()">${yrs.map(v => `<option ${v === y ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <select class="inp !w-auto !py-1.5 ml-auto" onchange="ui.carYear=this.value;compareModal()">${yrs.map(v => `<option ${v === y ? 'selected' : ''}>${v}</option>`).join('')}</select>
     </div>
     <div class="grid md:grid-cols-3 gap-4">
       <div class="rounded-xl bg-sky-50 border border-sky-200 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-sky-800">Θεωρητικό (έργα)</div>
@@ -2483,18 +2483,22 @@ function compareSection(y) {
     <div class="grid lg:grid-cols-2 gap-5 mt-6">
       <div><div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Θεωρητικό ανά έργο</div>
         ${c.rows.filter(r => r.days).length ? `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="tbl w-full text-sm"><thead><tr><th>Έργο</th><th class="num">Μέρες</th><th class="num">Αμάξια</th><th class="num">Ποσό</th></tr></thead><tbody>
-          ${c.rows.filter(r => r.days).sort((a, b) => b.carCost - a.carCost).map(r => `<tr class="cursor-pointer hover:bg-slate-50" onclick="openProject('${r.p.id}')"><td>${dot(r.p.color, 2)} ${esc(r.p.name)}${r.carPrice ? '' : ' <span class="text-[11px] text-amber-700 font-semibold">χωρίς τιμή αμαξιού</span>'}</td><td class="num">${r.days}</td><td class="num">${r.cars}</td><td class="num font-semibold">${fmt.format(r.carCost)}</td></tr>`).join('')}
+          ${c.rows.filter(r => r.days).sort((a, b) => b.carCost - a.carCost).map(r => `<tr class="cursor-pointer hover:bg-slate-50" onclick="closeModal();openProject('${r.p.id}')"><td>${dot(r.p.color, 2)} ${esc(r.p.name)}${r.carPrice ? '' : ' <span class="text-[11px] text-amber-700 font-semibold">χωρίς τιμή αμαξιού</span>'}</td><td class="num">${r.days}</td><td class="num">${r.cars}</td><td class="num font-semibold">${fmt.format(r.carCost)}</td></tr>`).join('')}
           </tbody></table></div>` : '<p class="text-sm text-slate-400">Δεν υπάρχουν μέρες εργασίας για αυτό το έτος.</p>'}
         ${c.noPrice.length ? `<p class="text-xs text-amber-700 mt-2">${c.noPrice.length} ${c.noPrice.length === 1 ? 'έργο δεν έχει' : 'έργα δεν έχουν'} τιμή αμαξιού, άρα το θεωρητικό τους μετράει 0. Βάλε την από την καρτέλα του έργου → Μεταφορά.</p>` : ''}
         ${c.tickets ? `<p class="text-xs text-slate-500 mt-2">Ακτοπλοϊκά/αεροπορικά των έργων (${fmt.format(c.tickets)}) δεν μπαίνουν στη σύγκριση, γιατί δεν αφορούν τα αυτοκίνητα.</p>` : ''}</div>
       <div><div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Πραγματικό ανά είδος</div>
         ${realRows.length ? `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="tbl w-full text-sm"><tbody>${realRows.map(([l, v]) => `<tr><td>${l}</td><td class="num font-semibold">${fmt.format(v)}</td></tr>`).join('')}
           <tr class="bg-slate-50"><td class="font-bold">Σύνολο</td><td class="num font-extrabold">${fmt.format(c.real.total)}</td></tr></tbody></table></div>` : '<p class="text-sm text-slate-400">Δεν υπάρχουν έξοδα αυτοκινήτων για αυτό το έτος.</p>'}</div>
-    </div></section>`;
+    </div></div>`;
+}
+function compareModal() {
+  openModal(`<button class="absolute top-4 right-4 text-slate-400 hover:text-slate-900 text-xl leading-none" aria-label="Κλείσιμο" onclick="closeModal()">✕</button>` + compareSection(ui.carYear || today().slice(0, 4)), true);
+  const mb = $('#modalBody'); if (mb) mb.classList.add('relative');
 }
 function renderCars() {
   const el = $('#carsBody'); if (!el) return;
-  if (!state.cars.length) { el.innerHTML = compareSection(ui.carYear || today().slice(0, 4)) + tollsSection(today().slice(0, 4)).replace('mt-6', 'mb-6') + `<div class="card p-10 text-center"><div class="text-slate-400 text-sm mb-3">Δεν υπάρχουν αυτοκίνητα.</div><button class="btn btn-primary" onclick="carModal()">＋ Πρόσθεσε το πρώτο</button></div>`; return; }
+  if (!state.cars.length) { el.innerHTML = tollsSection(today().slice(0, 4)).replace('mt-6', 'mb-6') + `<div class="card p-10 text-center"><div class="text-slate-400 text-sm mb-3">Δεν υπάρχουν αυτοκίνητα.</div><button class="btn btn-primary" onclick="carModal()">＋ Πρόσθεσε το πρώτο</button></div>`; return; }
   const y = today().slice(0, 4), ex = state.carExp.filter(e => e.date.startsWith(y) && e.carId !== EPASS), tl = tolls().filter(e => e.date.startsWith(y)).reduce((s, e) => s + e.amount, 0);
   const fuel = ex.filter(e => e.type === 'fuel'), other = ex.filter(e => e.type !== 'fuel');
   const al = carAlerts();
@@ -2509,7 +2513,6 @@ function renderCars() {
       ${card('Σύνολο ' + y, fmt.format(ex.reduce((s, e) => s + e.amount, 0) + tl), `${state.cars.length} οχήματα + διόδια`)}
       <div class="col-span-2 lg:col-span-1 grid">${card('Λήξεις (30 ημέρες)', al.length, al.length ? 'δες παραπάνω' : 'όλα εντάξει')}</div>
     </div>
-    ${compareSection(ui.carYear || y)}
     <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${state.cars.map(c => {
       const ce = ex.filter(e => e.carId === c.id), f = ce.filter(e => e.type === 'fuel');
       return `<button class="card p-5 text-left hover:shadow-md transition fade-in" onclick="openCar('${c.id}')">
