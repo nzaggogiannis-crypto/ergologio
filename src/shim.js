@@ -89,7 +89,10 @@ document.getElementById('agForm').onsubmit = async ev => {
       await updateProfile(c.user, { displayName: name });
       location.reload();
     } else await signInWithEmailAndPassword(auth, email, pass);
-  } catch (e) { fail(e); }
+  } catch (e) {
+    if (signup && e && e.code === 'auth/email-already-in-use') { setMode(false); msg('Υπάρχει ήδη λογαριασμός με αυτό το email. Βάλε τον κωδικό του και πάτα «Σύνδεση», ή πάτα «Ξέχασα τον κωδικό».'); }
+    else fail(e);
+  }
   btn.disabled = false;
 };
 document.getElementById('agReset').onclick = async () => {
