@@ -597,7 +597,7 @@ document.addEventListener('keydown', e => {
   if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || (e.key !== ' ' && e.key !== 'Enter')) return;
   const el = e.target; if (!el || !el.matches || !el.matches('input,select')) return;
   if (['checkbox', 'radio', 'file', 'button', 'submit', 'date'].includes(el.type)) return;
-  const form = el.closest('form'); if (!form) return;
+  const form = el.closest('form'); if (!form || form.dataset.noadvance !== undefined) return;
   if (el.getAttribute('role') === 'combobox') {
     const box = $('#' + el.id + 'Drop');
     if (e.key === 'Enter' && box && !box.hidden && supItems.length && supIdx >= 0) return;   // διαλέγει από τη λίστα

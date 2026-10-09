@@ -66,7 +66,7 @@ const fail = e => msg(ERR[e && e.code] || ('Σφάλμα: ' + ((e && e.code) || 
 let signup = false;
 function setMode(s) {
   signup = s;
-  document.getElementById('agName').parentElement.hidden = !s;
+  document.getElementById('agNameRow').hidden = !s;
   document.getElementById('agSubmit').textContent = s ? 'Δημιουργία λογαριασμού' : 'Σύνδεση';
   document.getElementById('agToggle').innerHTML = s ? 'Έχεις ήδη λογαριασμό; <b>Σύνδεση</b>' : 'Πρώτη φορά εδώ; <b>Δημιουργία λογαριασμού</b>';
   document.getElementById('agPass').autocomplete = s ? 'new-password' : 'current-password';
