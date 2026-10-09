@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    // Ιδιοκτήτης: ο λογαριασμός Google του Νίκου
+    function isOwner() { return signedIn() && request.auth.token.email == 'nzaggogiannis@gmail.com' && request.auth.token.email_verified == true; }
+    // Πλήρης πρόσβαση: όσοι έχει εγκρίνει ο ιδιοκτήτης (meta/access)
+    function isFull() {
+      return signedIn() && exists(/databases/$(database)/documents/meta/access)
+        && request.auth.uid in get(/databases/$(database)/documents/meta/access).data.get('full', {});
+    }
+    function isAdmin() { return isOwner() || isFull(); }
+
+    // Όλα τα δεδομένα της επιχείρησης: μόνο ιδιοκτήτης και πλήρης πρόσβαση
+    match /{document=**} { allow read, write: if isAdmin(); }
+
+    // Ποιος έχει πλήρη πρόσβαση: το διαβάζουν όλοι οι συνδεδεμένοι, το αλλάζουν μόνο ιδιοκτήτης και πλήρης πρόσβαση
+    match /meta/access { allow read: if signedIn(); }
+    // Λίστα έργων/προμηθευτών για τη φόρμα του εργαζόμενου
+    match /shared/{docId} { allow read: if signedIn(); }
+    // Οι μέρες εργασίας του κάθε εργαζόμενου: μόνο ο ίδιος
+    match /staff/{uid} { allow read: if signedIn() && request.auth.uid == uid; }
+    // Αίτημα σύνδεσης, τιμολόγια και δηλώσεις ημερών του εργαζόμενου: μόνο ο ίδιος
+    match /pending/{uid} { allow read, write: if signedIn() && request.auth.uid == uid; }
+    match /pending/{uid}/{rest=**} { allow read, write: if signedIn() && request.auth.uid == uid; }
+  }
+}
