@@ -485,7 +485,7 @@ function refreshViews() {   // ανανεώνει μόνο πίνακες/σύν
   if (ui.view === 'data' && !busyIn('#accessPanel')) renderAccess();
   if (ui.view === 'dashboard') { renderKpis(); if (!busyIn('#dashTable')) renderDashTable(); }
   if (ui.view === 'notif') $('#main').innerHTML = notifHTML();
-  if (ui.view === 'files' && !$('#modal').classList.contains('flex')) $('#main').innerHTML = filesHTML();
+  if (ui.view === 'files' && fileTab() !== 'dbx' && !$('#modal').classList.contains('flex')) $('#main').innerHTML = filesHTML();
   if (ui.view === 'suppliers' && !busyIn('#supTable')) renderSuppliers();
   if (ui.view === 'customers' && !busyIn('#custTable')) renderCustomers();
   if (ui.view === 'cars') renderCars();
@@ -776,7 +776,7 @@ function render() {
   if (ui.view === 'labor') { m.innerHTML = laborHTML(); renderWorkers(); renderLaborSummary(); }
   if (ui.view === 'data') { m.innerHTML = dataHTML(); renderDataCounts(); renderAccess(); }
   if (ui.view === 'notif') { m.innerHTML = notifHTML(); }
-  if (ui.view === 'files') { m.innerHTML = filesHTML(); }
+  if (ui.view === 'files') { m.innerHTML = filesHTML(); if (fileTab() === 'dbx') dbxRender(); }
 }
 function pageHeader(title, sub, right = '') {
   return (navStack.length ? `<button class="text-sm font-semibold text-slate-500 hover:text-slate-900 mb-3 inline-flex items-center gap-1" onclick="goBack()">‹ Πίσω</button>` : '') +
@@ -2891,7 +2891,15 @@ const fItems = () => Object.entries(filesDoc().items || {}).filter(([, v]) => v 
 const fSize = n => n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toLocaleString('el-GR', { maximumFractionDigits: 1 })} MB`;
 const fPath = id => { const out = []; const all = Object.fromEntries(fFolders().map(f => [f.id, f])); let c = all[id], g = 0; while (c && g++ < 30) { out.unshift(c); c = all[c.parent]; } return out; };
 function fDescendants(id) { const all = fFolders(), out = new Set([id]); let grew = true; while (grew) { grew = false; all.forEach(f => { if (out.has(f.parent) && !out.has(f.id)) { out.add(f.id); grew = true; } }); } return out; }
+/* Καρτέλες της σελίδας Αρχεία: Dropbox | αποθηκευμένα στην εφαρμογή */
+const fileTab = () => ui.fileTab || (DBX.key ? 'dbx' : 'app');
+function fileTabs() {
+  if (!DBX.key) return '';
+  const t = fileTab(), b = (k, l) => `<button class="flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-semibold transition ${t === k ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-900'}" onclick="ui.fileTab='${k}';render()">${l}</button>`;
+  return `<div class="inline-flex w-full sm:w-auto gap-1 p-1 rounded-xl bg-slate-200/70 mb-4">${b('dbx', '☁ Dropbox')}${b('app', '📁 Αποθηκευμένα στην εφαρμογή')}</div>`;
+}
 function filesHTML() {
+  if (fileTab() === 'dbx') return pageHeader('Αρχεία', 'Τα αρχεία του Dropbox σου, μέσα από την εφαρμογή') + fileTabs() + '<div id="dbxBody"></div>';
   if (mode !== 'cloud') return pageHeader('Αρχεία', 'PDF σε φακέλους') + '<div class="card p-8 text-sm text-slate-500">Τα αρχεία λειτουργούν μόνο όταν η εφαρμογή είναι συνδεδεμένη με τη βάση.</div>';
   const cur = ui.fileFolder && fFolders().some(f => f.id === ui.fileFolder) ? ui.fileFolder : '';
   const q = norm(ui.fileSearch || ''), items = fItems(), used = items.reduce((s, f) => s + (+f.size || 0), 0);
@@ -2902,7 +2910,7 @@ function filesHTML() {
   const ico = '<svg class="w-9 h-9 shrink-0" viewBox="0 0 24 24" fill="#fef3c7" stroke="#d97706" stroke-width="1.6"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
   const pdf = '<span class="w-9 h-9 shrink-0 rounded-lg bg-rose-50 text-rose-600 text-[10px] font-extrabold flex items-center justify-center border border-rose-200">PDF</span>';
   return pageHeader('Αρχεία', 'Αποθήκευση PDF σε φακέλους · συμβάσεις, άδειες, μελέτες, πιστοποιήσεις',
-      `<button class="btn btn-ghost" onclick="folderModal()">＋ Φάκελος</button><label class="btn btn-primary cursor-pointer">⬆ Ανέβασμα PDF<input type="file" accept="application/pdf,.pdf" multiple class="hidden" onchange="uploadFiles(this.files);this.value=''"></label>`) + `
+      `<button class="btn btn-ghost" onclick="folderModal()">＋ Φάκελος</button><label class="btn btn-primary cursor-pointer">⬆ Ανέβασμα PDF<input type="file" accept="application/pdf,.pdf" multiple class="hidden" onchange="uploadFiles(this.files);this.value=''"></label>`) + fileTabs() + `
   <section class="card fade-in" ondragover="event.preventDefault();this.classList.add('ring-2','ring-amber-400')" ondragleave="this.classList.remove('ring-2','ring-amber-400')" ondrop="event.preventDefault();this.classList.remove('ring-2','ring-amber-400');uploadFiles(event.dataTransfer.files)">
     <div class="p-4 border-b border-slate-100 flex flex-wrap items-center gap-2">
       <nav class="flex flex-wrap items-center gap-1 text-sm min-w-0 flex-1">${crumbs.map((c, i) => i === crumbs.length - 1 ? `<b class="text-slate-900 truncate">${esc(c.name)}</b>` : `<button class="text-slate-500 hover:text-slate-900 hover:underline truncate" onclick="ui.fileFolder='${c.id}';ui.fileSearch='';render()">${esc(c.name)}</button><span class="text-slate-300">›</span>`).join('')}</nav>
@@ -3028,6 +3036,135 @@ function delFile(id) {
   const f = fItems().find(x => x.id === id); if (!f) return;
   confirmModal({ title: `Διαγραφή «${esc(f.name)}»;`, ok: 'Διαγραφή', danger: true, body: '<p>Το αρχείο σβήνεται οριστικά από όλες τις συσκευές.</p>',
     onOk: async () => { commit([M('meta/files', { items: { [id]: null } })]); render(); await removeBlobs(f); toast('Το αρχείο διαγράφηκε', 'warn'); } });
+}
+
+/* ============ DROPBOX: προβολή του λογαριασμού Dropbox μέσα στα Αρχεία ============
+   Σύνδεση OAuth (PKCE) χωρίς server· το κλειδί μένει μόνο σε αυτή τη συσκευή (localStorage). Μόνο ανάγνωση. */
+const DBX = { key: window.DBX_KEY || '', path: '', cache: {}, busy: false, err: '', q: '', results: null, account: '', refs: [] };
+const dbxRef = p => { DBX.refs.push(p); return DBX.refs.length - 1; };   // διαδρομές με ειδικούς χαρακτήρες χωρίς προβλήματα στα onclick
+const DBX_LS = 'ergologio-dbx', DBX_REDIRECT = location.origin + location.pathname;
+const dbxTok = () => { try { return JSON.parse(localStorage.getItem(DBX_LS) || 'null'); } catch (e) { return null; } };
+const dbxSave = t => { try { t ? localStorage.setItem(DBX_LS, JSON.stringify(t)) : localStorage.removeItem(DBX_LS); } catch (e) {} };
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function dbxConnect() {
+  const ver = b64url(crypto.getRandomValues(new Uint8Array(48))), state = b64url(crypto.getRandomValues(new Uint8Array(12)));
+  const ch = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ver)));
+  try { sessionStorage.setItem('dbx-pkce', JSON.stringify({ ver, state })); } catch (e) {}
+  location.href = 'https://www.dropbox.com/oauth2/authorize?' + new URLSearchParams({ client_id: DBX.key, response_type: 'code', code_challenge: ch,
+    code_challenge_method: 'S256', token_access_type: 'offline', redirect_uri: DBX_REDIRECT, state }).toString();
+}
+/* Επιστροφή από το Dropbox με ?code=… : ανταλλαγή με κλειδί */
+async function dbxHandleRedirect() {
+  const u = new URL(location.href), code = u.searchParams.get('code'), state = u.searchParams.get('state'), er = u.searchParams.get('error');
+  if (!code && !er) return false;
+  let pk = null; try { pk = JSON.parse(sessionStorage.getItem('dbx-pkce') || 'null'); sessionStorage.removeItem('dbx-pkce'); } catch (e) {}
+  history.replaceState(null, '', DBX_REDIRECT);
+  ui.view = 'files'; ui.fileTab = 'dbx';
+  if (er) { DBX.err = 'Η σύνδεση με το Dropbox ακυρώθηκε.'; return true; }
+  if (!pk || pk.state !== state) { DBX.err = 'Η σύνδεση με το Dropbox δεν ολοκληρώθηκε· δοκίμασε ξανά.'; return true; }
+  try {
+    const r = await fetch('https://api.dropboxapi.com/oauth2/token', { method: 'POST', body: new URLSearchParams({ code, grant_type: 'authorization_code', client_id: DBX.key, code_verifier: pk.ver, redirect_uri: DBX_REDIRECT }) });
+    const j = await r.json(); if (!r.ok || !j.access_token) throw new Error(j.error_description || j.error || r.status);
+    dbxSave({ access: j.access_token, refresh: j.refresh_token, exp: Date.now() + (j.expires_in - 60) * 1000 });
+    toast('✓ Συνδέθηκες στο Dropbox');
+  } catch (e) { DBX.err = 'Η σύνδεση με το Dropbox απέτυχε (' + (e.message || e) + ').'; }
+  return true;
+}
+async function dbxAccess(force) {
+  const t = dbxTok(); if (!t) return null;
+  if (!force && t.access && t.exp > Date.now()) return t.access;
+  if (!t.refresh) return null;
+  const r = await fetch('https://api.dropboxapi.com/oauth2/token', { method: 'POST', body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refresh, client_id: DBX.key }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) { if (r.status === 400 || r.status === 401) dbxSave(null); return null; }
+  dbxSave({ ...t, access: j.access_token, exp: Date.now() + (j.expires_in - 60) * 1000 });
+  return j.access_token;
+}
+async function dbxApi(path, body, retry = true) {
+  const tok = await dbxAccess(); if (!tok) throw Object.assign(new Error('Δεν είσαι συνδεδεμένος στο Dropbox'), { code: 'auth' });
+  const r = await fetch('https://api.dropboxapi.com/2/' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + tok, ...(body === null ? {} : { 'Content-Type': 'application/json' }) }, body: body === null ? undefined : JSON.stringify(body) });
+  if (r.status === 401 && retry) { await dbxAccess(true); return dbxApi(path, body, false); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error_summary || ('Dropbox ' + r.status)), { code: r.status });
+  return j;
+}
+async function dbxList(path) {
+  let j = await dbxApi('files/list_folder', { path, limit: 2000, include_non_downloadable_files: false });
+  const out = [...j.entries];
+  while (j.has_more && out.length < 10000) { j = await dbxApi('files/list_folder/continue', { cursor: j.cursor }); out.push(...j.entries); }
+  return out;
+}
+const dbxIcon = n => { const e = (n.split('.').pop() || '').toLowerCase();
+  const m = { pdf: ['PDF', 'bg-rose-50 text-rose-600 border-rose-200'], xls: ['XLS', 'bg-emerald-50 text-emerald-700 border-emerald-200'], xlsx: ['XLS', 'bg-emerald-50 text-emerald-700 border-emerald-200'], csv: ['CSV', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+    doc: ['DOC', 'bg-sky-50 text-sky-700 border-sky-200'], docx: ['DOC', 'bg-sky-50 text-sky-700 border-sky-200'], jpg: ['IMG', 'bg-violet-50 text-violet-700 border-violet-200'], jpeg: ['IMG', 'bg-violet-50 text-violet-700 border-violet-200'], png: ['IMG', 'bg-violet-50 text-violet-700 border-violet-200'],
+    heic: ['IMG', 'bg-violet-50 text-violet-700 border-violet-200'], dwg: ['DWG', 'bg-amber-50 text-amber-700 border-amber-200'], zip: ['ZIP', 'bg-slate-100 text-slate-600 border-slate-200'] }[e] || [e.slice(0, 4).toUpperCase() || 'FILE', 'bg-slate-100 text-slate-600 border-slate-200'];
+  return `<span class="w-9 h-9 shrink-0 rounded-lg border text-[10px] font-extrabold flex items-center justify-center ${m[1]}">${esc(m[0])}</span>`; };
+const DBX_FOLDER = '<svg class="w-9 h-9 shrink-0" viewBox="0 0 24 24" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
+async function dbxRender(reload) {
+  const el = $('#dbxBody'); if (!el) return;
+  if (!DBX.key) { el.innerHTML = '<div class="card p-6 text-sm text-slate-500">Η σύνδεση με Dropbox δεν έχει ρυθμιστεί ακόμα.</div>'; return; }
+  if (!dbxTok()) {
+    el.innerHTML = `<div class="card p-8 max-w-xl fade-in text-center">
+      <div class="w-14 h-14 rounded-2xl bg-sky-100 text-sky-700 flex items-center justify-center text-3xl mx-auto mb-4">☁</div>
+      <h2 class="text-xl font-extrabold">Σύνδεση με Dropbox</h2>
+      <p class="text-sm text-slate-500 mt-2">Συνδέσου μία φορά σε αυτή τη συσκευή για να βλέπεις εδώ τους φακέλους και τα αρχεία του Dropbox σου. Η εφαρμογή μόνο <b>διαβάζει</b>· δεν αλλάζει και δεν σβήνει τίποτα.</p>
+      ${DBX.err ? `<p class="text-sm text-rose-600 mt-3">${esc(DBX.err)}</p>` : ''}
+      <button class="btn btn-primary mt-5 !py-3 !px-6" onclick="dbxConnect()">Σύνδεση με Dropbox</button></div>`;
+    return;
+  }
+  const path = DBX.path, crumbs = [{ p: '', n: 'Dropbox' }];
+  path.split('/').filter(Boolean).reduce((acc, part) => { const p = acc + '/' + part; crumbs.push({ p, n: part }); return p; }, '');
+  const q = DBX.q.trim(); DBX.refs = [];
+  el.innerHTML = `<section class="card fade-in">
+    <div class="p-4 border-b border-slate-100 flex flex-wrap items-center gap-2">
+      <nav class="flex flex-wrap items-center gap-1 text-sm min-w-0 flex-1">${crumbs.map((c, i) => i === crumbs.length - 1 && !q ? `<b class="text-slate-900 truncate">${esc(c.n)}</b>` : `<button class="text-slate-500 hover:text-slate-900 hover:underline truncate" onclick="dbxGo(DBX.refs[${dbxRef(c.p)}])">${esc(c.n)}</button><span class="text-slate-300">›</span>`).join('')}${q ? `<b class="text-slate-900">Αναζήτηση «${esc(q)}»</b>` : ''}</nav>
+      <form class="flex gap-1.5" onsubmit="event.preventDefault();dbxSearch($('#dbxQ').value)"><input id="dbxQ" class="inp !w-52 !py-1.5" placeholder="🔍 Αναζήτηση σε όλο το Dropbox" value="${esc(q)}">${q ? `<button type="button" class="btn btn-ghost !py-1.5" onclick="dbxSearch('')">✕</button>` : ''}</form>
+      <button class="btn btn-ghost !py-1.5" title="Ανανέωση" onclick="dbxRender(true)">↻</button>
+    </div>
+    <div id="dbxList"><div class="p-8 flex items-center gap-3 text-sm text-slate-500"><svg class="w-5 h-5 animate-spin text-sky-600" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity=".25"/><path d="M22 12a10 10 0 00-10-10" stroke="currentColor" stroke-width="3"/></svg>Φόρτωση από Dropbox…</div></div>
+    <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1"><span id="dbxAcc">${DBX.account ? 'Λογαριασμός: ' + esc(DBX.account) : ''}</span><span>Πάτα ένα αρχείο για να ανοίξει.</span>
+      <button class="ml-auto underline hover:text-rose-600" onclick="dbxDisconnect()">Αποσύνδεση Dropbox από αυτή τη συσκευή</button></div></section>`;
+  try {
+    if (!DBX.account) dbxApi('users/get_current_account', null).then(a => { DBX.account = (a.name && a.name.display_name) + ' · ' + a.email; const x = $('#dbxAcc'); if (x) x.textContent = 'Λογαριασμός: ' + DBX.account; }).catch(() => {});
+    let entries;
+    if (q) entries = DBX.results;
+    else { if (reload || !DBX.cache[path]) DBX.cache[path] = await dbxList(path); entries = DBX.cache[path]; }
+    if (DBX.path !== path || !$('#dbxList')) return;
+    const folders = entries.filter(e => e['.tag'] === 'folder').sort((a, b) => a.name.localeCompare(b.name, 'el'));
+    const files = entries.filter(e => e['.tag'] === 'file').sort((a, b) => String(b.server_modified).localeCompare(String(a.server_modified)));
+    $('#dbxList').innerHTML = !folders.length && !files.length ? `<div class="p-10 text-center text-sm text-slate-400">${q ? 'Δεν βρέθηκε τίποτα.' : 'Ο φάκελος είναι άδειος.'}</div>` : `<div class="divide-y divide-slate-100">
+      ${folders.map(f => `<button class="flex items-center gap-3 w-full text-left px-4 py-2.5 hover:bg-slate-50" onclick="dbxGo(DBX.refs[${dbxRef(f.path_display)}])">${DBX_FOLDER}<span class="min-w-0"><span class="block font-semibold truncate">${esc(f.name)}</span>${q ? `<span class="block text-xs text-slate-400 truncate">${esc(f.path_display)}</span>` : ''}</span></button>`).join('')}
+      ${files.map(f => `<div class="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50">
+        <button class="flex items-center gap-3 flex-1 min-w-0 text-left" onclick="dbxOpen(DBX.refs[${dbxRef(f.path_lower)}])">${dbxIcon(f.name)}<span class="min-w-0"><span class="block font-semibold truncate">${esc(f.name)}</span>
+          <span class="block text-xs text-slate-400 truncate">${fSize(+f.size || 0)} · ${f.server_modified ? dmy(f.server_modified.slice(0, 10)) : ''}${q ? ' · ' + esc(f.path_display.split('/').slice(0, -1).join('/') || '/') : ''}</span></span></button>
+        <button class="text-slate-400 hover:text-slate-900 px-1.5" title="Λήψη" onclick="dbxOpen(DBX.refs[${dbxRef(f.path_lower)}],true)">⬇</button></div>`).join('')}
+    </div>`;
+  } catch (e) {
+    const l = $('#dbxList'); if (!l) return;
+    if (e.code === 'auth') { dbxSave(null); return dbxRender(); }
+    l.innerHTML = `<div class="p-8 text-sm text-rose-600">Το Dropbox δεν απάντησε (${esc(e.message || 'σφάλμα')}). <button class="underline" onclick="dbxRender(true)">Ξαναδοκίμασε</button></div>`;
+  }
+}
+function dbxGo(p) { DBX.path = p; DBX.q = ''; DBX.results = null; dbxRender(); }
+async function dbxSearch(q) {
+  DBX.q = String(q || '').trim(); DBX.results = null;
+  if (!DBX.q) return dbxRender();
+  try { const j = await dbxApi('files/search_v2', { query: DBX.q, options: { max_results: 100, file_status: 'active' } }); DBX.results = (j.matches || []).map(m => m.metadata && m.metadata.metadata).filter(Boolean); }
+  catch (e) { DBX.results = []; toast('Η αναζήτηση απέτυχε: ' + (e.message || ''), 'err'); }
+  dbxRender();
+}
+async function dbxOpen(path, download) {
+  const w = download ? null : window.open('', '_blank');
+  if (w) w.document.write('<p style="font-family:sans-serif;padding:20px;color:#64748b">Άνοιγμα από Dropbox…</p>');
+  try {
+    const j = await dbxApi('files/get_temporary_link', { path });
+    if (w) w.location.href = j.link;
+    else { const a = document.createElement('a'); a.href = j.link; a.download = j.metadata ? j.metadata.name : ''; a.target = '_blank'; document.body.appendChild(a); a.click(); a.remove(); }
+  } catch (e) { if (w) w.close(); toast('Το αρχείο δεν άνοιξε: ' + (e.message || ''), 'err'); }
+}
+function dbxDisconnect() {
+  confirmModal({ title: 'Αποσύνδεση Dropbox;', ok: 'Αποσύνδεση', body: '<p>Η εφαρμογή δεν θα βλέπει πια το Dropbox σε αυτή τη συσκευή. Τα αρχεία σου στο Dropbox δεν επηρεάζονται.</p>',
+    onOk: async () => { try { await dbxApi('auth/token/revoke', null); } catch (e) {} dbxSave(null); DBX.cache = {}; DBX.account = ''; DBX.path = ''; render(); toast('Αποσυνδέθηκες από το Dropbox', 'warn'); } });
 }
 
 /* ============ ΗΜΕΡΟΛΟΓΙΟ (πίνακας μέρες × εργαζόμενοι, όπως στο Excel) ============ */
@@ -4643,6 +4780,7 @@ function withdrawEmpInvoice(id) {
 /* ============ ΕΚΚΙΝΗΣΗ ============ */
 function boot() {
   if (booted) return;
+  if (/[?&](code|error)=/.test(location.search) && DBX.key) { dbxHandleRedirect().then(() => { if (booted) go('files'); }); }
   booted = true; setSync();
   go(ui.view); window.booted = true;
   if (role === 'owner') { updateNavBadge(); scheduleStaffSync(); setTimeout(notifPopup, 600); if (isSuperAdmin) setTimeout(migrateAccess, 1500); }

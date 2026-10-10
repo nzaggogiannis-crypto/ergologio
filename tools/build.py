@@ -51,7 +51,7 @@ head = f"""<!doctype html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="ΕργοΛόγιο">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f59e0b'/%3E%3Ctext x='32' y='45' font-family='Arial' font-weight='800' font-size='38' text-anchor='middle' fill='%230f172a'%3EE%3C/text%3E%3C/svg%3E">
-<script>window.FB_CONFIG = {json.dumps(cfg['firebase'])}; window.OWNER_EMAIL = {json.dumps(cfg['owner'])}; window.FB_DB = {json.dumps(cfg.get('db', '(default)'))};
+<script>window.FB_CONFIG = {json.dumps(cfg['firebase'])}; window.OWNER_EMAIL = {json.dumps(cfg['owner'])}; window.FB_DB = {json.dumps(cfg.get('db', '(default)'))}; window.DBX_KEY = {json.dumps(cfg.get('dropboxKey', ''))};
 window.__fbReady = new Promise(r => window.__fbResolve = r);</script>
 """
 open(OUT, 'w', encoding='utf-8').write(head + s + '\n' + gate + f'\n<script type="module">\n{shim}\n</script>\n</body></html>\n')
