@@ -480,6 +480,7 @@ function refreshViews() {   // ανανεώνει μόνο πίνακες/σύν
   if (!booted || (role === 'employee' && (ui.view === 'me' || ui.view === 'myinv' || !myAccess))) return;
   updateNavBadge();
   if (ui.view === 'admin' && !$('#modal').classList.contains('flex') && !busyIn('#main')) render();
+  if (role === 'owner') discordReminders();
   if (ui.view === 'invoices' && !busyIn('#pendPanel')) renderPending();
   if (ui.view === 'data' && !busyIn('#accessPanel')) renderAccess();
   if (ui.view === 'dashboard') { renderKpis(); if (!busyIn('#dashTable')) renderDashTable(); }
@@ -1013,6 +1014,7 @@ function saveProject(e, id) {
   }
   ops.push(opProject(id || uid(), { name, addr: old ? old.addr || '' : '', client, color: $('#pColor').value }));
   commit(ops);
+  discord('proj', old ? `✏️ Έργο ενημερώθηκε: ${name}` : `🏗️ Νέο έργο: ${name}`, old && old.name !== name ? [`Παλιό όνομα: ${old.name}`] : [], [['Πελάτης', client || '—']]);
   closeModal(); render(); toast(id ? '✓ Το έργο ενημερώθηκε' : `✓ Δημιουργήθηκε: ${name}`);
 }
 function deleteProjectModal(id) {
@@ -1033,6 +1035,7 @@ function deleteProjectModal(id) {
 }
 function deleteProject(id) {
   const name = proj(id).name;
+  discord('proj', `🗑️ Διαγραφή έργου: ${name}`, ['Το έργο διαγράφηκε μαζί με τα τιμολόγια και τις παρουσίες του.']);
   const ops = [opProject(id, null)];
   Object.keys(docs).forEach(p => { if ((p.startsWith('inv/') || p.startsWith('sal/') || p.startsWith('thr/')) && docs[p] && docs[p].project === id) ops.push({ kind: 'del', path: p }); });
   const byDoc = {};
@@ -1137,6 +1140,7 @@ function saveDoc(c, old) {
   if (old && docPathOf(old) !== docPathOf(c)) ops.push(opDoc(old, true));
   ops.push(opDoc(c));
   commit(ops);
+  if (!old) dcInv(c, 'Νέο τιμολόγιο');
   return { newParty: !known };
 }
 
@@ -1914,7 +1918,7 @@ function xlSetProj(i, v) {
 async function xlCommit() {
   xlAnalyse();
   const K = KIND[xl.kind], known = new Map(K.parties().map(p => [norm(p.name), p])), ops = [], groups = {};
-  let n = 0;
+  let n = 0, xlSum = 0; const xlFile = xl.file;
   xl.sheets.forEach(sh => sh.rows.forEach(r => {
     if (r.skip || r.err || r.dup) return;
     const kp = known.get(norm(r.supName));
@@ -1922,7 +1926,7 @@ async function xlCommit() {
     if (kp) name = kp.name; else if (K.opParty) { ops.push(K.opParty(uid(), { name })); known.set(norm(name), { name, id: 'new' }); }
     const c = { id: uid(), kind: xl.kind, date: r.date, invNo: r.invNo, supName: name, amount: r.amount, project: r.project };
     const op = opDoc(c), g = groups[op.path] ??= { project: c.project, items: {} };
-    Object.assign(g.items, op.body.items); n++;
+    Object.assign(g.items, op.body.items); n++; xlSum += +r.amount || 0;
   }));
   Object.entries(groups).forEach(([path, body]) => ops.push(M(path, body)));
   modalLocked = true;
@@ -1930,6 +1934,7 @@ async function xlCommit() {
   await commit(ops, (d, t) => { const b = $('#progBar'); if (b) b.style.width = (d / t * 100) + '%'; });
   modalLocked = false; closeModal(); const kind = xl.kind; xl = null;
   ui.invKind = kind; render(); toast(syncErr ? 'Κάποιες καταχωρίσεις δεν αποθηκεύτηκαν· δοκίμασε ξανά.' : `✓ Καταχωρήθηκαν ${n} τιμολόγια από Excel`, syncErr ? 'err' : 'ok');
+  if (n && !syncErr) discord('inv', `📊 Εισαγωγή από Excel: ${n} τιμολόγια`, [`Αρχείο: ${xlFile}`], [['Είδος', KIND[kind].title], ['Σύνολο', fmt.format(xlSum)]]);
 }
 function copyInvoices() {
   const list = filteredInvoices();
@@ -3224,6 +3229,7 @@ function projectHTML() {
 function toggleProjectHidden(pid) {
   const p = state.projects.find(x => x.id === pid); if (!p) return;
   commit([opProject(pid, { hidden: !p.hidden })]); render();
+  discord('proj', `${p.hidden ? '👁️ Εμφάνιση' : '🙈 Απόκρυψη'} έργου: ${p.name}`);
   toast(p.hidden ? `👁 Το «${p.name}» μετράει ξανά στα σύνολα` : `🙈 Το «${p.name}» μπήκε σε απόκρυψη — δεν μετράει στα σύνολα της εταιρίας`);
 }
 function contractModal(pid) {
@@ -3254,6 +3260,7 @@ function saveContract(e, pid) {
   const rawE = $('#kEnd').value.trim(), end = rawE ? dmyToIso(rawE) : '';
   if (rawE && !end) return toast('Η λήξη πρέπει να είναι σε μορφή ΗΗ/ΜΜ/ΕΕΕΕ', 'err');
   commit([opProject(pid, { contract: { no: $('#kNo').value.trim(), amount, date, end } })]);
+  discord('proj', `📄 Σύμβαση: ${proj(pid).name}`, [], [['Ποσό', fmt.format(amount)], ['Αρ.', $('#kNo').value.trim() || '—'], ['Λήξη', end ? dmy(end) : '—']]);
   closeModal(); render(); toast('✓ Η σύμβαση αποθηκεύτηκε');
 }
 function removeContract(pid) {
@@ -3991,7 +3998,14 @@ function revokeFull(uid) {
     body: `<p>Ο/η ${esc(f.name || 'χρήστης')} την επόμενη φορά που θα ανοίξει τη σελίδα θα δει μόνο «Αποστολή αιτήματος». Για να μην μπαίνει καθόλου, αφαίρεσέ τον και από την Κοινοποίηση.</p>`,
     onOk: () => { commit([M('meta/access', { full: { [uid]: null } })]); renderAccess(); toast('Η πλήρης πρόσβαση αφαιρέθηκε', 'warn'); } });
 }
-function extChanged() { updateNavBadge(); scheduleRefresh(); if (booted && role === 'owner') setTimeout(notifPopup, 400); }
+function extChanged() { updateNavBadge(); scheduleRefresh(); if (booted && role === 'owner') { setTimeout(notifPopup, 400); discordJoins(); } }
+function discordJoins() {
+  const c = docs['meta/discord']; if (!isSuperAdmin || !ext.accessLoaded || !c || !c.url || !c.on || !(c.events || {}).users) return;
+  const sent = c.sent || {}, fresh = Object.entries(ext.joins).filter(([uid, v]) => v && v.name !== undefined && !(ext.access || {})[uid] && !linkOf(uid) && !sent['join_' + uid]);
+  if (!fresh.length) return;
+  fresh.forEach(([, v]) => discord('users', `👤 Νέο αίτημα πρόσβασης: ${v.name || 'χωρίς όνομα'}`, [v.email || '', 'Έγκριση από «Χρήστες & δικαιώματα».']));
+  commit([M('meta/discord', { sent: Object.fromEntries(fresh.map(([uid]) => ['join_' + uid, Date.now()])) })]);
+}
 function updateNavBadge() {
   const n = role === 'owner' ? pendingList().length : 0, r = role === 'owner' ? joinRequests().length : 0;
   const set = (key, count) => {
@@ -4080,6 +4094,7 @@ function approvePending(uid, id, override) {
   const invId = uid_();
   ops.push(opInvoice({ id: invId, date: v.date, invNo: v.invNo, supName, amount: v.amount, project: v.project }));
   commit(ops);
+  dcInv({ kind: 'exp', date: v.date, invNo: v.invNo, supName, amount: v.amount, project: v.project }, `Εγκρίθηκε τιμολόγιο από ${(linkOf(uid) || {}).name || p.by || 'εργαζόμενο'}`);
   const decided = { status: 'approved', decidedAt: Date.now(), invoiceId: invId, final: { date: v.date, invNo: v.invNo, supName, amount: v.amount, projectName: proj(v.project).name } };
   ext.pend[uid][id] = { ...p, ...decided };
   directWrite('merge', `pending/${uid}/items/${id}`, decided);
@@ -4142,6 +4157,91 @@ function renderAccess() {
     <div class="flex-1 min-w-[220px]"><h3 class="font-bold">Χρήστες & δικαιώματα</h3><p class="text-sm text-slate-500 mt-1">Έγκριση νέων χρηστών, ρόλοι και τι βλέπει ο καθένας.${n ? ` <b class="text-rose-600">${n} νέα αιτήματα.</b>` : ''}</p></div>
     <button class="btn btn-primary" onclick="go('admin')">Άνοιγμα</button></section>`;
 }
+/* ============ DISCORD: αυτόματες ειδοποιήσεις σε κανάλι ============
+   Ρύθμιση: meta/discord (ιδιοκτήτες) + αντίγραφο στο shared/notify (για ενέργειες εργαζομένων). Μόνο ο Super Admin την αλλάζει. */
+const DC_EVENTS = [
+  ['inv', 'Νέο τιμολόγιο', 'Κάθε νέα καταχώριση αγοράς, πώλησης ή προς τρίτους (και εισαγωγή από Excel)'],
+  ['proj', 'Αλλαγές σε έργα', 'Νέο έργο, επεξεργασία, σύμβαση, απόκρυψη, διαγραφή'],
+  ['staff', 'Ενέργειες εργαζομένων', 'Τιμολόγιο ή δήλωση ημέρας για έγκριση'],
+  ['remind', 'Υπενθυμίσεις & λήξεις', 'Ειδοποιήσεις ΚΤΕΟ, ασφαλειών, συμβάσεων και δικές σου υπενθυμίσεις'],
+  ['users', 'Νέοι χρήστες', 'Αίτημα πρόσβασης από νέο λογαριασμό'],
+];
+const DC_COLOR = { inv: 0xf59e0b, proj: 0x0ea5e9, staff: 0x8b5cf6, remind: 0xef4444, users: 0x10b981, test: 0x64748b };
+const dcCfg = () => docs['meta/discord'] || docs['shared/notify'] || {};
+const DC_RE = /^https:\/\/(?:(?:canary|ptb)\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/;
+async function dcPost(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`Discord ${r.status}${t ? ': ' + t.slice(0, 120) : ''}`); }
+}
+/* Στέλνει ειδοποίηση αν είναι ενεργή η κατηγορία. Δεν μπλοκάρει ποτέ την εφαρμογή. */
+function discord(ev, title, lines = [], fields = []) {
+  try {
+    const c = dcCfg(); if (!c.url || !c.on || !(c.events || {})[ev] || mode !== 'cloud') return;
+    const who = myName || window.__fbEmail || '';
+    const embed = { title: String(title).slice(0, 250), color: DC_COLOR[ev] || 0x64748b, timestamp: new Date().toISOString(),
+      description: lines.filter(Boolean).join('\n').slice(0, 3900) || undefined,
+      fields: fields.filter(f => f && f[1] !== '' && f[1] != null).slice(0, 20).map(([name, value, inline = true]) => ({ name: String(name).slice(0, 250), value: String(value).slice(0, 1000), inline })),
+      footer: { text: 'ΕργοΛόγιο' + (who ? ' · ' + who : '') } };
+    dcPost(c.url, { username: 'ΕργοΛόγιο', embeds: [embed] }).catch(e => { (window.__diag || []).push('discord: ' + e.message); });
+  } catch (e) {}
+}
+const dcInv = (c, label) => discord('inv', `${KIND[c.kind] ? KIND[c.kind].icon || '🧾' : '🧾'} ${label}: ${c.supName || '—'}`, [],
+  [['Αξία', fmt.format(+c.amount || 0)], ['Έργο', proj(c.project).name], ['Ημερομηνία', dmy(c.date)], ['Αρ. τιμολογίου', c.invNo || '—'], ['Είδος', (KIND[c.kind] || {}).title || 'Αγορά']]);
+function discordSettingsHTML() {
+  const c = docs['meta/discord'] || {}, ev = c.events || Object.fromEntries(DC_EVENTS.map(([k]) => [k, true]));
+  return `<section class="card p-5 md:p-6 mb-6 fade-in">
+    <div class="flex flex-wrap items-center gap-3 mb-1"><h3 class="font-bold text-lg">💬 Ειδοποιήσεις στο Discord</h3>
+      <span class="rounded-full px-2 py-0.5 text-[11px] font-bold ${c.url && c.on ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}">${c.url && c.on ? 'Ενεργές' : 'Ανενεργές'}</span></div>
+    <p class="text-sm text-slate-500 mb-4">Στο Discord: Ρυθμίσεις καναλιού → Integrations → Webhooks → New Webhook → «Copy Webhook URL», και επικόλλησέ το εδώ.</p>
+    <form class="space-y-3" onsubmit="event.preventDefault();saveDiscord()">
+      <div><label class="lbl" for="dcUrl">Webhook URL</label><input id="dcUrl" class="inp font-mono text-xs" value="${esc(c.url || '')}" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" spellcheck="false"></div>
+      <label class="flex items-center gap-2 text-sm font-semibold"><input id="dcOn" type="checkbox" class="w-4 h-4 accent-emerald-600" ${c.on || !c.url ? 'checked' : ''}> Αποστολή ειδοποιήσεων</label>
+      <div><div class="lbl">Τι να στέλνει</div><div class="grid sm:grid-cols-2 gap-1.5">${DC_EVENTS.map(([k, l, d]) => `<label class="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
+        <input type="checkbox" class="dc-ev mt-0.5 w-4 h-4 accent-emerald-600" value="${k}" ${ev[k] ? 'checked' : ''}><span><b>${l}</b><span class="block text-xs text-slate-500">${d}</span></span></label>`).join('')}</div></div>
+      <div class="flex flex-wrap gap-2 pt-1"><button class="btn btn-primary">Αποθήκευση</button><button type="button" class="btn btn-ghost" onclick="testDiscord()">🔔 Δοκιμή σύνδεσης</button>
+        ${c.url ? `<button type="button" class="btn btn-ghost !text-rose-600" onclick="clearDiscord()">Αφαίρεση</button>` : ''}</div>
+      <p id="dcRes" class="text-sm min-h-[1.25rem]"></p>
+    </form>
+    <p class="text-xs text-slate-500 mt-2">Το URL το βλέπουν μόνο οι ιδιοκτήτες και οι εγκεκριμένοι χρήστες (χρειάζεται για να φεύγουν και οι δικές τους ειδοποιήσεις). Αν διαρρεύσει, σβήσε το webhook στο Discord και βάλε νέο.</p>
+  </section>`;
+}
+function readDiscordForm() {
+  const url = $('#dcUrl').value.trim();
+  const events = Object.fromEntries(DC_EVENTS.map(([k]) => [k, false])); document.querySelectorAll('.dc-ev:checked').forEach(c => events[c.value] = true);
+  return { url, on: $('#dcOn').checked, events };
+}
+function saveDiscord() {
+  const v = readDiscordForm();
+  if (v.url && !DC_RE.test(v.url)) { $('#dcRes').innerHTML = '<span class="text-rose-600">Το URL δεν μοιάζει με Discord webhook (https://discord.com/api/webhooks/…).</span>'; return; }
+  const body = { ...v, upd: Date.now() };
+  commit([{ kind: 'set', path: 'meta/discord', body }]);
+  directWrite('set', 'shared/notify', body);
+  render(); toast('✓ Οι ρυθμίσεις Discord αποθηκεύτηκαν');
+}
+function clearDiscord() {
+  confirmModal({ title: 'Αφαίρεση Discord;', ok: 'Αφαίρεση', danger: true, body: '<p>Δεν θα στέλνονται πια ειδοποιήσεις στο Discord.</p>',
+    onOk: () => { commit([{ kind: 'del', path: 'meta/discord' }]); directWrite('del', 'shared/notify'); render(); toast('Το Discord αφαιρέθηκε', 'warn'); } });
+}
+async function testDiscord() {
+  const { url } = readDiscordForm(), out = $('#dcRes');
+  if (!DC_RE.test(url)) { out.innerHTML = '<span class="text-rose-600">Βάλε πρώτα ένα σωστό Webhook URL.</span>'; return; }
+  out.innerHTML = '<span class="text-slate-500">Αποστολή δοκιμαστικού μηνύματος…</span>';
+  try {
+    await dcPost(url, { username: 'ΕργοΛόγιο', embeds: [{ title: '✅ Δοκιμή σύνδεσης', description: 'Το ΕργοΛόγιο συνδέθηκε σωστά με αυτό το κανάλι.', color: DC_COLOR.test,
+      fields: [{ name: 'Από', value: myName || window.__fbEmail || '—', inline: true }, { name: 'Ώρα', value: new Date().toLocaleString('el-GR'), inline: true }], timestamp: new Date().toISOString(), footer: { text: 'ΕργοΛόγιο' } }] });
+    out.innerHTML = '<span class="text-emerald-700 font-semibold">✓ Το μήνυμα στάλθηκε. Δες το κανάλι στο Discord.</span>';
+  } catch (e) {
+    out.innerHTML = `<span class="text-rose-600">Αποτυχία: ${esc(e.message || 'δεν υπάρχει σύνδεση')}. Έλεγξε ότι το URL είναι σωστό και ότι το webhook δεν έχει διαγραφεί.</span>`;
+  }
+}
+/* Υπενθυμίσεις/λήξεις: στέλνονται μία φορά ανά στάδιο (κρατιέται στο meta/discord.sent, κοινό για όλες τις συσκευές) */
+function discordReminders() {
+  const c = docs['meta/discord']; if (role !== 'owner' || !c || !c.url || !c.on || !(c.events || {}).remind) return;
+  const sent = c.sent || {}, due = notifActive().filter(x => !sent[x.skey]); if (!due.length) return;
+  due.forEach(x => discord('remind', `${x.icon} ${x.what}: ${x.title}`, [x.sub, `**${whenOf(x)}** (${dmy(x.date)})`]));
+  commit([M('meta/discord', { sent: Object.fromEntries(due.map(x => [x.skey, Date.now()])) })]);
+}
+
 /* ============ SUPER ADMIN: ΧΡΗΣΤΕΣ & ΔΙΚΑΙΩΜΑΤΑ ============ */
 const accessList = () => Object.entries(ext.access || {}).filter(([, v]) => v && UROLES[v.role]).map(([uid, v]) => ({ uid, ...v }))
   .sort((a, b) => ['owner', 'engineer', 'employee'].indexOf(a.role) - ['owner', 'engineer', 'employee'].indexOf(b.role) || String(a.name).localeCompare(String(b.name), 'el'));
@@ -4207,7 +4307,7 @@ function adminHTML() {
   const sw = (uid, k, on, dis) => `<button type="button" ${dis ? 'disabled' : ''} onclick="adminSet('${uid}','mod','${k}')" class="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${on ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-400'} ${dis ? 'opacity-70 cursor-default' : 'hover:shadow-sm'}">
       <span class="relative inline-block w-7 h-4 rounded-full ${on ? 'bg-emerald-500' : 'bg-slate-300'}"><span class="absolute top-0.5 ${on ? 'left-3.5' : 'left-0.5'} w-3 h-3 rounded-full bg-white shadow transition-all"></span></span>${MODS.find(m => m[0] === k)[1]}</button>`;
   const roleTone = { owner: 'bg-amber-100 text-amber-900', engineer: 'bg-violet-100 text-violet-800', employee: 'bg-slate-100 text-slate-700' };
-  return pageHeader('Χρήστες & δικαιώματα', 'Μόνο εσύ (Super Admin) βλέπεις αυτή τη σελίδα. Οι αλλαγές ισχύουν αμέσως και ελέγχονται και από τη βάση δεδομένων.') + `
+  return pageHeader('Χρήστες & δικαιώματα', 'Μόνο εσύ (Super Admin) βλέπεις αυτή τη σελίδα. Οι αλλαγές ισχύουν αμέσως και ελέγχονται και από τη βάση δεδομένων.') + discordSettingsHTML() + `
   ${reqs.length ? `<section class="card border-amber-300 mb-6 fade-in overflow-hidden"><div class="px-5 py-3.5 bg-amber-50 border-b border-amber-200 font-bold text-amber-900">Νέα αιτήματα (${reqs.length})</div>
     <div class="divide-y divide-slate-100">${reqs.map(r => `<div class="p-4 flex flex-wrap items-center gap-2">
       <div class="min-w-0 flex-1 basis-48"><div class="font-semibold">${esc(r.name || 'Χωρίς όνομα')}</div><div class="text-xs text-slate-400">${esc(r.email || '')}${r.at ? ' · ' + dmy(iso(new Date(r.at))) : ''}</div></div>
@@ -4281,6 +4381,7 @@ const emp = { staff: null, catalog: null, joined: null, items: {}, days: {}, loa
 function employeeStart() {
   const done = k => () => { emp.loaded.add(k); maybeBoot(); };
   listenExtra(`pending/${myUid}/days`, false, m => { emp.days = m; empChanged(); }, done('days'));
+  if (myAccess) listenExtra('shared/notify', true, d => { if (d) docs['shared/notify'] = d; else delete docs['shared/notify']; });
   // Ενότητες που του έχει ανοίξει ο Super Admin: φορτώνονται μόνο αυτά που επιτρέπονται
   [...myMods].forEach(k => (MOD_PATHS[k] || []).forEach(p => staffPaths.add(p)));
   staffPaths.forEach(p => listen(p, p.startsWith('meta/') || p.startsWith('shared/')));
@@ -4443,6 +4544,7 @@ function empDeclare(d, pid, note = '') {
   const body = { date: d, projectId: pid, projectName: proj(pid).name, note: String(note || '').trim().slice(0, 140), status: 'pending', at: Date.now(), by: (emp.staff && emp.staff.name) || myName };
   emp.days = { ...emp.days, [d]: body };
   directWrite('set', `pending/${myUid}/days/${d}`, body).then(() => {}, () => {});
+  discord('staff', `📅 Δήλωση ημέρας από ${body.by || 'εργαζόμενο'}`, [d < today() ? '**Για προηγούμενη μέρα**' : 'Για σήμερα', body.note ? `«${body.note}»` : ''], [['Ημερομηνία', dmy(d)], ['Έργο', body.projectName]]);
   closeModal(); render(); toast(d < today() ? '✓ Στάλθηκε· ο διαχειριστής θα ειδοποιηθεί' : '✓ Στάλθηκε για έγκριση');
 }
 function empWithdrawDay(d) {
@@ -4498,6 +4600,7 @@ function submitEmpInvoice(e) {
     status: 'pending', at: Date.now(), by: (emp.staff && emp.staff.name) || myName };
   emp.items = { ...emp.items, [id]: body };
   directWrite('set', `pending/${myUid}/items/${id}`, body).then(() => {}, () => {});
+  discord('staff', `🧾 Τιμολόγιο για έγκριση από ${body.by || 'εργαζόμενο'}`, [body.note ? `«${body.note}»` : ''], [['Προμηθευτής', body.supName], ['Αξία', fmt.format(body.amount)], ['Έργο', body.projectName], ['Ημερομηνία', dmy(body.date)]]);
   render(); toast('✓ Στάλθηκε για έγκριση');
 }
 function withdrawEmpInvoice(id) {

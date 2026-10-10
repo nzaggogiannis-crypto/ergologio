@@ -46,6 +46,8 @@ service cloud.firestore {
     match /shared/catalog { allow read: if signedIn(); }
     // Θεωρητικό κόστος μεταφοράς (σύνοψη χωρίς μισθούς) για όσους βλέπουν τα αυτοκίνητα
     match /shared/transport { allow read: if can(A(), 'cars'); }
+    // Ρύθμιση Discord (για να φεύγουν και οι ειδοποιήσεις των εγκεκριμένων χρηστών)
+    match /shared/notify { allow read: if signedIn() && exists(/databases/$(database)/documents/access/$(request.auth.uid)); }
     // Οι μέρες του κάθε εργαζόμενου: μόνο ο ίδιος
     match /staff/{uid} { allow read: if signedIn() && request.auth.uid == uid; }
     // Αίτημα σύνδεσης, τιμολόγια και δηλώσεις ημερών: μόνο ο ίδιος
