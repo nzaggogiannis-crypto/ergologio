@@ -2,25 +2,53 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    // Ιδιοκτήτης: ο λογαριασμός Google του Νίκου
-    function isOwner() { return signedIn() && request.auth.token.email == 'nzaggogiannis@gmail.com' && request.auth.token.email_verified == true; }
-    // Πλήρης πρόσβαση: όσοι έχει εγκρίνει ο ιδιοκτήτης (meta/access)
-    function isFull() {
-      return signedIn() && exists(/databases/$(database)/documents/meta/access)
-        && request.auth.uid in get(/databases/$(database)/documents/meta/access).data.get('full', {});
+    // Super Admin: ο λογαριασμός Google του Νίκου
+    function isSuper() { return signedIn() && request.auth.token.email == 'nzaggogiannis@gmail.com' && request.auth.token.email_verified == true; }
+    // Δικαιώματα χρήστη: access/<uid> = { role: 'owner'|'engineer'|'employee', mods: { dash, invoices, calendar, suppliers, customers, labor, cars, files, notif, me, myinv } }
+    function A() {
+      return signedIn() && exists(/databases/$(database)/documents/access/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/access/$(request.auth.uid)).data : {};
     }
-    function isAdmin() { return isOwner() || isFull(); }
+    function owner(a) { return a.get('role', '') == 'owner'; }
+    function can(a, m) { return owner(a) || a.get('mods', {}).get(m, false) == true; }
 
-    // Όλα τα δεδομένα της επιχείρησης: μόνο ιδιοκτήτης και πλήρης πρόσβαση
-    match /{document=**} { allow read, write: if isAdmin(); }
+    // Ιδιοκτήτες: τα πάντα, εκτός από τα δικαιώματα (access) που τα αλλάζει μόνο ο Super Admin
+    match /{col}/{rest=**} { allow read, write: if col != 'access' && (isSuper() || owner(A())); }
 
-    // Ποιος έχει πλήρη πρόσβαση: το διαβάζουν όλοι οι συνδεδεμένοι, το αλλάζουν μόνο ιδιοκτήτης και πλήρης πρόσβαση
-    match /meta/access { allow read: if signedIn(); }
-    // Λίστα έργων/προμηθευτών για τη φόρμα του εργαζόμενου
-    match /shared/{docId} { allow read: if signedIn(); }
-    // Οι μέρες εργασίας του κάθε εργαζόμενου: μόνο ο ίδιος
+    match /access/{uid} {
+      allow read: if isSuper() || (signedIn() && request.auth.uid == uid);
+      allow write: if isSuper();
+    }
+
+    // Ανά ενότητα (για μηχανικούς / εργαζόμενους με επιπλέον πρόσβαση)
+    function metaOk(d, a) {
+      return (d in ['projects', 'suppliers', 'customers', 'supalias'] && (can(a, 'dash') || can(a, 'invoices') || can(a, 'suppliers') || can(a, 'customers') || can(a, 'calendar') || can(a, 'labor') || can(a, 'notif')))
+        || (d == 'workers' && (can(a, 'dash') || can(a, 'calendar') || can(a, 'labor')))
+        || (d == 'cars' && (can(a, 'cars') || can(a, 'notif')))
+        || (d == 'files' && can(a, 'files'))
+        || (d in ['reminders', 'notif'] && can(a, 'notif'));
+    }
+    function invOk(a) { return can(a, 'dash') || can(a, 'invoices') || can(a, 'suppliers'); }
+    function salOk(a) { return can(a, 'dash') || can(a, 'invoices') || can(a, 'customers'); }
+    function thrOk(a) { return can(a, 'dash') || can(a, 'invoices'); }
+    function attOk(a) { return can(a, 'dash') || can(a, 'calendar') || can(a, 'labor'); }
+    function carOk(a) { return can(a, 'cars') || can(a, 'notif'); }
+
+    match /meta/{d} { allow read, write: if d != 'access' && metaOk(d, A()); }
+    match /inv/{x} { allow read, write: if invOk(A()); }
+    match /sal/{x} { allow read, write: if salOk(A()); }
+    match /thr/{x} { allow read, write: if thrOk(A()); }
+    match /att/{x} { allow read, write: if attOk(A()); }
+    match /car/{x} { allow read, write: if carOk(A()); }
+    match /fblob/{x} { allow read, write: if can(A(), 'files'); }
+
+    // Για όλους τους συνδεδεμένους: λίστα έργων/προμηθευτών της φόρμας τιμολογίων
+    match /shared/catalog { allow read: if signedIn(); }
+    // Θεωρητικό κόστος μεταφοράς (σύνοψη χωρίς μισθούς) για όσους βλέπουν τα αυτοκίνητα
+    match /shared/transport { allow read: if can(A(), 'cars'); }
+    // Οι μέρες του κάθε εργαζόμενου: μόνο ο ίδιος
     match /staff/{uid} { allow read: if signedIn() && request.auth.uid == uid; }
-    // Αίτημα σύνδεσης, τιμολόγια και δηλώσεις ημερών του εργαζόμενου: μόνο ο ίδιος
+    // Αίτημα σύνδεσης, τιμολόγια και δηλώσεις ημερών: μόνο ο ίδιος
     match /pending/{uid} { allow read, write: if signedIn() && request.auth.uid == uid; }
     match /pending/{uid}/{rest=**} { allow read, write: if signedIn() && request.auth.uid == uid; }
   }

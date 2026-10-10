@@ -127,6 +127,10 @@
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
         <span class="whitespace-nowrap md:hidden">Ειδοπ.</span><span class="whitespace-nowrap hidden md:inline">Ειδοποιήσεις</span>
       </button>
+      <button id="navAdmin" class="nav-btn hidden" data-nav="admin" onclick="go('admin')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span class="whitespace-nowrap md:hidden">Χρήστες</span><span class="whitespace-nowrap hidden md:inline">Χρήστες & δικαιώματα</span>
+      </button>
       <button class="nav-btn" data-nav="data" onclick="go('data')">
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
         <span class="whitespace-nowrap md:hidden">Δεδομ.</span><span class="whitespace-nowrap hidden md:inline">Δεδομένα</span>
@@ -246,7 +250,36 @@ let docs = {};                   // path → body (καθρέφτης)
 let pending = [];                // αλλαγές που δεν έχουν επιβεβαιωθεί ακόμα
 let state = { projects: [], workers: [], suppliers: [], customers: [], invoices: [], sales: [], attendance: [], links: [], cars: [], carExp: [] };
 /* Ρόλοι: 'owner' = διαχειριστής (ο κάτοχος της σελίδας), 'employee' = εργαζόμενος με τον οποίο έχει μοιραστεί */
-let role = 'owner', userNs = null, myUid = null, myName = '', realOwner = true;   // realOwner=false: μηχανικός με πλήρη πρόσβαση (Editor)
+let role = 'owner', userNs = null, myUid = null, myName = '', realOwner = true;
+/* ---- Ρόλοι & ενότητες ----
+   Super Admin (email ιδιοκτήτη) · Ιδιοκτήτης (όλα) · Μηχανικός · Εργαζόμενος.
+   access/<uid> = { role, mods:{...}, worker, name, email } · τα ίδια ελέγχονται και από τους κανόνες της βάσης (firestore.rules). */
+let isSuperAdmin = false, myAccess = null, myMods = new Set();
+const staffPaths = new Set();
+const MODS = [
+  ['me', 'Οι μέρες μου', 'Προσωπικό ημερολόγιο και δηλώσεις ημερών'],
+  ['myinv', 'Τιμολόγια αγορών', 'Αποστολή τιμολογίων για έγκριση'],
+  ['dash', 'Έργα', 'Όλα τα έργα: έσοδα, κόστη, αποτέλεσμα'],
+  ['invoices', 'Τιμολόγια εταιρίας', 'Όλες οι αγορές, πωλήσεις, προς τρίτους'],
+  ['calendar', 'Ημερολόγιο όλων', 'Παρουσίες και ημερομίσθια όλων'],
+  ['suppliers', 'Προμηθευτές', ''], ['customers', 'Πελάτες', ''],
+  ['labor', 'Εργαζόμενοι', 'Λίστα και αμοιβές'],
+  ['cars', 'Αυτοκίνητα', 'Έξοδα, διόδια, θεωρητικό ή πραγματικό κόστος'],
+  ['files', 'Αρχεία', 'PDF σε φακέλους'],
+  ['notif', 'Ειδοποιήσεις', 'Λήξεις και υπενθυμίσεις'],
+];
+const UROLES = { employee: 'Εργαζόμενος', engineer: 'Μηχανικός', owner: 'Ιδιοκτήτης' };
+const ROLE_DEF = { employee: ['me', 'myinv'], engineer: ['me', 'myinv', 'cars'], owner: MODS.map(m => m[0]).filter(k => k !== 'me' && k !== 'myinv') };
+const modsFor = (r, extra = {}) => { const o = Object.fromEntries(MODS.map(([k]) => [k, ROLE_DEF[r].includes(k)])); Object.entries(extra || {}).forEach(([k, v]) => { if (k in o) o[k] = !!v; }); return o; };
+const VIEW_MOD = { dashboard: 'dash', project: 'dash', invoices: 'invoices', calendar: 'calendar', suppliers: 'suppliers', supplier: 'suppliers', customers: 'customers', customer: 'customers',
+  labor: 'labor', worker: 'labor', cars: 'cars', car: 'cars', files: 'files', notif: 'notif', me: 'me', myinv: 'myinv' };
+const MOD_PATHS = { dash: ['meta/projects', 'meta/suppliers', 'meta/customers', 'meta/supalias', 'meta/workers', 'inv', 'sal', 'thr', 'att'],
+  invoices: ['meta/projects', 'meta/suppliers', 'meta/customers', 'meta/supalias', 'inv', 'sal', 'thr'], calendar: ['meta/projects', 'meta/workers', 'att'],
+  suppliers: ['meta/projects', 'meta/suppliers', 'inv'], customers: ['meta/projects', 'meta/customers', 'sal'], labor: ['meta/projects', 'meta/workers', 'att'],
+  cars: ['meta/cars', 'car', 'shared/transport'], files: ['meta/files'], notif: ['meta/reminders', 'meta/notif', 'meta/cars', 'car', 'meta/projects'] };
+const staffCan = v => v === 'me' || v === 'myinv' ? myMods.has(v) : !!VIEW_MOD[v] && myMods.has(VIEW_MOD[v]);
+const STAFF_ORDER = ['me', 'myinv', 'dashboard', 'invoices', 'calendar', 'cars', 'files', 'suppliers', 'customers', 'labor', 'notif'];
+const firstStaffView = () => STAFF_ORDER.find(staffCan) || '';   // realOwner=false: μηχανικός με πλήρη πρόσβαση (Editor)
 let booted = false, syncState = 'ok', syncErr = false, inflight = 0;
 
 const ym = d => d.slice(0, 7);
@@ -300,7 +333,8 @@ function applyOp(d, op) {
   else if (op.kind === 'set') d[op.path] = op.body;
   else d[op.path] = mergeDeep(d[op.path], op.body);
 }
-function rebuild() {
+function rebuild() { rebuild0(); if (role === 'employee' && typeof emp !== 'undefined') applyCatalog(); }
+function rebuild0() {
   const items = p => (docs[p] && docs[p].items) || {};
   const projects = Object.entries(items('meta/projects')).filter(([, v]) => v)
     .map(([id, v]) => ({ id, name: v.name || '—', addr: v.addr || '', client: v.client || '', color: v.color || '#94a3b8',
@@ -415,17 +449,22 @@ async function resyncDoc(path) {
 
 /* ---- Συνδρομές στη βάση ---- */
 const loaded = new Set();
+function maybeBoot() {
+  if (booted) return;
+  if (role === 'employee') { if (emp.loaded.size >= 5 && [...staffPaths].every(p => loaded.has(p))) boot(); }
+  else if (loaded.size >= 6) boot();
+}
 function afterSnap(key) {
   pending.forEach(op => applyOp(docs, op));
   loaded.add(key); rebuild();
-  if (!booted) { if (loaded.size >= 6) boot(); } else scheduleRefresh();
+  if (!booted) maybeBoot(); else scheduleRefresh();
 }
 function listen(path, isDoc) {
   const onErr = e => {
     (window.__diag || []).push('listen ' + path + ': ' + ((e && e.code) || '') + ' ' + ((e && e.message) || ''));
     if (e && e.code === 'unavailable') { setTimeout(() => listen(path, isDoc), 3000); return; }
     setSync('error'); toast(`Ο συγχρονισμός σταμάτησε (${(e && e.code) || 'σφάλμα'}). Άνοιξε ξανά τη σελίδα.`, 'err');
-    loaded.add(path); if (!booted && loaded.size >= 6) boot();
+    loaded.add(path); maybeBoot();
   };
   if (isDoc) db.doc(path).onSnapshot(s => { if (s.exists) docs[path] = s.data(); else delete docs[path]; afterSnap(path); }, onErr);
   else db.collection(path).onSnapshot(qs => {
@@ -438,8 +477,9 @@ let refreshTimer = null;
 function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refreshViews, 150); }
 function busyIn(sel) { const el = $(sel), ae = document.activeElement; return el && ae && ae !== document.body && el.contains(ae); }
 function refreshViews() {   // ανανεώνει μόνο πίνακες/σύνολα, ποτέ φόρμες που γράφεις
-  if (!booted || role === 'employee') return;
+  if (!booted || (role === 'employee' && (ui.view === 'me' || ui.view === 'myinv' || !myAccess))) return;
   updateNavBadge();
+  if (ui.view === 'admin' && !$('#modal').classList.contains('flex') && !busyIn('#main')) render();
   if (ui.view === 'invoices' && !busyIn('#pendPanel')) renderPending();
   if (ui.view === 'data' && !busyIn('#accessPanel')) renderAccess();
   if (ui.view === 'dashboard') { renderKpis(); if (!busyIn('#dashTable')) renderDashTable(); }
@@ -710,10 +750,16 @@ function render() {
   if (!booted) return;
   const m = $('#main');
   if (role === 'employee') {
-    if (ui.view !== 'me' && ui.view !== 'myinv') { ui.view = 'me'; document.querySelectorAll('[data-nav]').forEach(b => b.classList.toggle('nav-active', b.dataset.nav === 'me')); }
-    m.innerHTML = ui.view === 'me' ? meHTML() : myInvHTML();
-    return;
+    if (!myAccess) { m.innerHTML = pageHeader('Καλώς ήρθες', 'ΕργοΛόγιο · ΔΥΡΑΣ ΤΕΧΝΙΚΗ') + employeeGateHTML(); return; }
+    if (!staffCan(ui.view)) {
+      const v = firstStaffView();
+      if (!v) { m.innerHTML = pageHeader('ΕργοΛόγιο', '') + '<div class="card p-6 max-w-xl text-sm text-slate-600">Δεν σου έχει δοθεί ακόμα πρόσβαση σε κάποια ενότητα. Επικοινώνησε με τον διαχειριστή.</div>'; return; }
+      ui.view = v; document.querySelectorAll('[data-nav]').forEach(b => b.classList.toggle('nav-active', b.dataset.nav === (VIEW_MOD[v] === 'dash' ? 'dashboard' : v)));
+    }
+    if (ui.view === 'me') { m.innerHTML = meHTML(); return; }
+    if (ui.view === 'myinv') { m.innerHTML = myInvHTML(); return; }
   }
+  if (ui.view === 'admin') { if (!isSuperAdmin) { ui.view = 'dashboard'; return render(); } m.innerHTML = adminHTML(); return; }
   if (ui.view === 'dashboard') { m.innerHTML = backupBanner() + dashboardHTML(); renderKpis(); renderDashTable(); }
   if (ui.view === 'worker') { if (!state.workers.some(w => w.id === ui.workerId)) { ui.view = 'labor'; return render(); } m.innerHTML = workerHTML(); renderWorkerProfile(); }
   if (ui.view === 'project') { if (!state.projects.some(p => p.id === ui.projectId)) { ui.view = 'dashboard'; return render(); } m.innerHTML = projectHTML(); renderProject(); }
@@ -2448,9 +2494,16 @@ function carsHTML() {
 }
 /* Θεωρητικό κόστος μεταφοράς (από τα έργα) έναντι πραγματικών εξόδων αυτοκινήτων + διοδίων */
 function transportCompare(y) {
-  const rows = state.projects.map(p => { const t = transportCost(p, state.attendance.filter(a => a.projectId === p.id), y); return { p, ...t }; })
-    .filter(r => r.days || r.carCost || r.ferryCost || r.airCost);
-  const theo = rows.reduce((s, r) => s + r.carCost, 0), tickets = rows.reduce((s, r) => s + r.ferryCost + r.airCost, 0);
+  let rows, theo, tickets;
+  if (role === 'employee' && !staffPaths.has('att')) {   // βλέπει μόνο αυτοκίνητα: παίρνει τη σύνοψη που ετοιμάζει ο ιδιοκτήτης
+    const t = (((docs['shared/transport'] || {}).years) || {})[y] || {};
+    rows = (t.rows || []).map(([name, color, days, cars, carCost, hp]) => ({ p: { id: '', name, color }, days, cars, carCost, carPrice: hp, ferryCost: 0, airCost: 0 }));
+    theo = +t.theo || 0; tickets = +t.tickets || 0;
+  } else {
+    rows = state.projects.map(p => { const t = transportCost(p, state.attendance.filter(a => a.projectId === p.id), y); return { p, ...t }; })
+      .filter(r => r.days || r.carCost || r.ferryCost || r.airCost);
+    theo = rows.reduce((s, r) => s + r.carCost, 0); tickets = rows.reduce((s, r) => s + r.ferryCost + r.airCost, 0);
+  }
   const ex = state.carExp.filter(e => e.date.startsWith(y));
   const by = t => ex.filter(e => e.type === t).reduce((s, e) => s + e.amount, 0);
   const real = { fuel: by('fuel'), toll: by('toll'), service: by('service'), kteo: by('kteo'), ins: by('ins'), other: by('other') };
@@ -2460,7 +2513,7 @@ function transportCompare(y) {
 function compareSection(y) {
   const c = transportCompare(y), diff = c.theo - c.real.total, over = diff < 0, max = Math.max(c.theo, c.real.total, 1);
   const pct = v => Math.round(v / max * 100);
-  const yrs = [...new Set([today().slice(0, 4), ...state.carExp.map(e => e.date.slice(0, 4)), ...state.attendance.map(a => a.date.slice(0, 4))])].sort().reverse();
+  const yrs = [...new Set([today().slice(0, 4), ...state.carExp.map(e => e.date.slice(0, 4)), ...state.attendance.map(a => a.date.slice(0, 4)), ...Object.keys(((docs['shared/transport'] || {}).years) || {})])].sort().reverse();
   const realRows = [['Καύσιμα', c.real.fuel], ['Διόδια', c.real.toll], ['Service', c.real.service], ['ΚΤΕΟ', c.real.kteo], ['Ασφάλειες', c.real.ins], ['Άλλα', c.real.other]].filter(([, v]) => v);
   return `<div>
     <div class="flex flex-wrap items-center gap-3 mb-4 pr-8">
@@ -2483,7 +2536,7 @@ function compareSection(y) {
     <div class="grid lg:grid-cols-2 gap-5 mt-6">
       <div><div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Θεωρητικό ανά έργο</div>
         ${c.rows.filter(r => r.days).length ? `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="tbl w-full text-sm"><thead><tr><th>Έργο</th><th class="num">Μέρες</th><th class="num">Αμάξια</th><th class="num">Ποσό</th></tr></thead><tbody>
-          ${c.rows.filter(r => r.days).sort((a, b) => b.carCost - a.carCost).map(r => `<tr class="cursor-pointer hover:bg-slate-50" onclick="closeModal();openProject('${r.p.id}')"><td>${dot(r.p.color, 2)} ${esc(r.p.name)}${r.carPrice ? '' : ' <span class="text-[11px] text-amber-700 font-semibold">χωρίς τιμή αμαξιού</span>'}</td><td class="num">${r.days}</td><td class="num">${r.cars}</td><td class="num font-semibold">${fmt.format(r.carCost)}</td></tr>`).join('')}
+          ${c.rows.filter(r => r.days).sort((a, b) => b.carCost - a.carCost).map(r => `<tr ${r.p.id && (role === 'owner' || myMods.has('dash')) ? `class="cursor-pointer hover:bg-slate-50" onclick="closeModal();openProject('${r.p.id}')"` : ''}><td>${dot(r.p.color, 2)} ${esc(r.p.name)}${r.carPrice ? '' : ' <span class="text-[11px] text-amber-700 font-semibold">χωρίς τιμή αμαξιού</span>'}</td><td class="num">${r.days}</td><td class="num">${r.cars}</td><td class="num font-semibold">${fmt.format(r.carCost)}</td></tr>`).join('')}
           </tbody></table></div>` : '<p class="text-sm text-slate-400">Δεν υπάρχουν μέρες εργασίας για αυτό το έτος.</p>'}
         ${c.noPrice.length ? `<p class="text-xs text-amber-700 mt-2">${c.noPrice.length} ${c.noPrice.length === 1 ? 'έργο δεν έχει' : 'έργα δεν έχουν'} τιμή αμαξιού, άρα το θεωρητικό τους μετράει 0. Βάλε την από την καρτέλα του έργου → Μεταφορά.</p>` : ''}
         ${c.tickets ? `<p class="text-xs text-slate-500 mt-2">Ακτοπλοϊκά/αεροπορικά των έργων (${fmt.format(c.tickets)}) δεν μπαίνουν στη σύγκριση, γιατί δεν αφορούν τα αυτοκίνητα.</p>` : ''}</div>
@@ -3836,7 +3889,7 @@ function parseBackup(text) {
    - shared/catalog: έργα + προμηθευτές, για τη φόρμα του εργαζόμενου (γράφει ο owner).
    - staff/<uid>: οι μέρες εργασίας του κάθε εργαζόμενου (γράφει ο owner, διαβάζει μόνο ο ίδιος).
    - pending/<uid> και pending/<uid>/items/*: αίτημα σύνδεσης και τιμολόγια του εργαζόμενου (γράφει ο ίδιος). */
-const ext = { joins: {}, staff: {}, shared: {}, pend: {}, days: {}, loaded: new Set() };
+const ext = { joins: {}, staff: {}, shared: {}, pend: {}, days: {}, access: {}, accessLoaded: false, loaded: new Set() };
 const pendSubs = {}, daySubs = {};
 const strHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const linkOf = uid => state.links.find(l => l.uid === uid);
@@ -3857,6 +3910,7 @@ function ownerExtras() {
   listenExtra('pending', false, m => { ext.joins = m; extChanged(); }, done('pending'));
   listenExtra('staff', false, m => { ext.staff = m; }, done('staff'));
   listenExtra('shared', false, m => { ext.shared = m; }, done('shared'));
+  if (isSuperAdmin) listenExtra('access', false, m => { ext.access = m; ext.accessLoaded = true; extChanged(); migrateAccess(); });
 }
 function syncPendSubs() {
   if (!db) return;
@@ -3924,7 +3978,7 @@ function pendingList() {
     .sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 const fullAccess = () => ((docs['meta/access'] || {}).full) || {};
-function joinRequests() { return Object.entries(ext.joins).filter(([uid, v]) => v && !linkOf(uid) && !fullAccess()[uid]).map(([uid, v]) => ({ uid, ...v })); }
+function joinRequests() { return Object.entries(ext.joins).filter(([uid, v]) => v && v.name !== undefined && !ext.access[uid]).map(([uid, v]) => ({ uid, ...v })); }
 function grantFull(uid) {
   const r = ext.joins[uid] || {};
   confirmModal({ title: `Πλήρης πρόσβαση στον/στην ${esc(r.name || 'χρήστη')};`, ok: 'Πλήρης πρόσβαση',
@@ -3948,7 +4002,7 @@ function updateNavBadge() {
     b.textContent = count;
   };
   const dd = role === 'owner' ? dayDecls() : [];
-  set('invoices', n); set('data', r); set('calendar', dd.length); set('notif', role === 'owner' ? notifUnseen().length + dd.filter(x => x.late).length : 0);
+  set('invoices', n); set('admin', isSuperAdmin ? r : 0); set('calendar', dd.length); set('notif', role === 'owner' ? notifUnseen().length + dd.filter(x => x.late).length : 0);
   updateMoreDot();
 }
 let staffTimer = null;
@@ -3959,6 +4013,11 @@ function syncStaff() {
   const cat = { projects: projSorted().map(p => [p.id, p.name, p.color]), suppliers: state.suppliers.map(s => s.name) };
   const csig = strHash(JSON.stringify(cat));
   if (!ext.shared.catalog || ext.shared.catalog.sig !== csig) { ext.shared.catalog = { ...cat, sig: csig }; directWrite('set', 'shared/catalog', { ...cat, sig: csig }); }
+  // Σύνοψη θεωρητικού κόστους μεταφοράς για όσους βλέπουν μόνο τα αυτοκίνητα (χωρίς μισθούς)
+  const ys = [...new Set(state.attendance.map(a => a.date.slice(0, 4)))].sort().slice(-3), years = {};
+  ys.forEach(y => { const c = transportCompare(y); years[y] = { theo: r2(c.theo), tickets: r2(c.tickets), rows: c.rows.filter(r => r.days).map(r => [r.p.name, r.p.color, r.days, r.cars, r2(r.carCost), r.carPrice ? 1 : 0]) }; });
+  const tsig = strHash(JSON.stringify(years));
+  if (!ext.shared.transport || ext.shared.transport.sig !== tsig) { ext.shared.transport = { years, sig: tsig }; directWrite('set', 'shared/transport', { years, sig: tsig }); }
   // Οι μέρες του κάθε συνδεδεμένου εργαζόμενου (τελευταίοι 13 μήνες, χωρίς ποσά)
   const from = addDays(today(), -400);
   state.links.forEach(l => {
@@ -4077,40 +4136,113 @@ function rejectPending(e, uid, id) {
 /* Πρόσβαση εργαζομένων (σελίδα Δεδομένα) */
 function renderAccess() {
   const el = $('#accessPanel'); if (!el) return;
-  if (mode !== 'cloud' || role !== 'owner') { el.innerHTML = ''; return; }
-  const reqs = joinRequests(), freeWorkers = state.workers.filter(w => !linkForWorker(w.id));
-  const wOpts = `<option value="">— Ποιος εργαζόμενος είναι; —</option>` + freeWorkers.map(w => `<option value="${w.id}">${esc(w.name)} · ${esc(w.role)}</option>`).join('') + `<option value="__new">＋ Νέος εργαζόμενος με αυτό το όνομα</option>`;
-  el.innerHTML = `<section class="card p-5 md:p-6 fade-in">
-    <h3 class="font-bold">Πρόσβαση εργαζομένων</h3>
-    <ol class="text-sm text-slate-600 mt-2 space-y-1 list-decimal pl-5">
-      <li>Μοιράσου τη σελίδα από την <b>Κοινοποίηση</b> με το email του και δικαίωμα <b>Editor</b>. <span class="text-rose-600">Με Viewer ή Commenter δεν μπορεί να στείλει τίποτα.</span></li>
-      <li>Ανοίγει τη σελίδα και πατάει «Αποστολή αιτήματος». Μέχρι να απαντήσεις δεν βλέπει τίποτα άλλο.</li>
-      <li>Εδώ διαλέγεις: <b>Σύνδεση</b> με καρτέλα εργαζομένου (βλέπει ως εργατικό δυναμικό) ή <b>Πλήρης πρόσβαση</b> (π.χ. μηχανικοί).</li>
-    </ol>
-    <div class="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-4 text-sm text-violet-950">
-      <div class="font-bold">Πλήρης πρόσβαση (π.χ. μηχανικοί)</div>
-      <p class="mt-1">Βλέπουν και αλλάζουν τα πάντα όπως εσύ — έργα, τιμολόγια, ημερολόγιο, κόστη, αυτοκίνητα. Μόνο εσύ βλέπεις την επαναφορά, τα demo και τη «Διαγραφή όλων».</p>
-      ${Object.keys(fullAccess()).length ? `<div class="mt-3 divide-y divide-violet-200 border border-violet-200 rounded-xl bg-white">${Object.entries(fullAccess()).filter(([, v]) => v).map(([u, v]) => `<div class="p-2.5 flex items-center gap-2"><span class="font-semibold flex-1 min-w-0 truncate">${esc(v.name || 'Χωρίς όνομα')}</span><button class="btn btn-ghost !py-1 !text-xs" onclick="revokeFull('${esc(u)}')">Αφαίρεση</button></div>`).join('')}</div>` : '<p class="mt-2 text-xs text-violet-800">Κανείς ακόμα.</p>'}
-    </div>
-    <p class="text-xs text-slate-500 mt-2">Ο εργαζόμενος βλέπει μόνο τις δικές του μέρες εργασίας (χωρίς ποσά), δηλώνει πού δούλεψε και στέλνει τιμολόγια για έγκριση. Δεν βλέπει κόστη, άλλους εργαζόμενους ή τα τιμολόγια της επιχείρησης.</p>
-    <div class="mt-5">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Αιτήματα σύνδεσης ${reqs.length ? `<span class="ml-1 rounded-full bg-rose-500 text-white px-1.5 py-0.5 text-[10px]">${reqs.length}</span>` : ''}</div>
-      ${reqs.length ? `<div class="divide-y divide-slate-100 border border-slate-200 rounded-xl">${reqs.map(r => `<div class="p-3 flex flex-wrap items-center gap-2">
-          <div class="min-w-0 flex-1 basis-40"><div class="font-semibold">${esc(r.name || 'Χωρίς όνομα')}</div><div class="text-xs text-slate-400">${r.at ? 'στις ' + dmy(iso(new Date(r.at))) : ''}</div></div>
-          <select id="lk-${esc(r.uid)}" class="inp !w-auto !py-1.5 flex-1 sm:flex-none">${wOpts}</select>
-          <button class="btn btn-primary !py-1.5" onclick="linkAccount('${esc(r.uid)}')">Σύνδεση ως εργαζόμενος</button>
-          <button class="btn btn-ghost !py-1.5 !text-violet-700" onclick="grantFull('${esc(r.uid)}')">Πλήρης πρόσβαση</button>
-          <button class="btn btn-ghost !py-1.5 !text-rose-600" onclick="dismissJoin('${esc(r.uid)}')">Απόρριψη</button></div>`).join('')}</div>`
-        : '<p class="text-sm text-slate-400">Κανένα αίτημα.</p>'}
-    </div>
-    <div class="mt-5">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Συνδεδεμένοι λογαριασμοί</div>
-      ${state.links.length ? `<div class="divide-y divide-slate-100 border border-slate-200 rounded-xl">${state.links.map(l => { const w = state.workers.find(x => x.id === l.workerId);
-          return `<div class="p-3 flex flex-wrap items-center gap-2"><div class="min-w-0 flex-1"><div class="font-semibold">${esc(w ? w.name : '(διαγραμμένος εργαζόμενος)')}</div>
-            <div class="text-xs text-slate-400">Λογαριασμός: ${esc(l.name || '—')}</div></div>
-            <button class="btn btn-ghost !py-1.5" onclick="unlinkAccount('${esc(l.uid)}')">Αποσύνδεση</button></div>`; }).join('')}</div>`
-        : '<p class="text-sm text-slate-400">Κανένας ακόμα.</p>'}
-    </div></section>`;
+  if (mode !== 'cloud' || !isSuperAdmin) { el.innerHTML = ''; return; }
+  const n = joinRequests().length;
+  el.innerHTML = `<section class="card p-5 md:p-6 fade-in flex flex-wrap items-center gap-4"><div class="text-2xl">🛡</div>
+    <div class="flex-1 min-w-[220px]"><h3 class="font-bold">Χρήστες & δικαιώματα</h3><p class="text-sm text-slate-500 mt-1">Έγκριση νέων χρηστών, ρόλοι και τι βλέπει ο καθένας.${n ? ` <b class="text-rose-600">${n} νέα αιτήματα.</b>` : ''}</p></div>
+    <button class="btn btn-primary" onclick="go('admin')">Άνοιγμα</button></section>`;
+}
+/* ============ SUPER ADMIN: ΧΡΗΣΤΕΣ & ΔΙΚΑΙΩΜΑΤΑ ============ */
+const accessList = () => Object.entries(ext.access || {}).filter(([, v]) => v && UROLES[v.role]).map(([uid, v]) => ({ uid, ...v }))
+  .sort((a, b) => ['owner', 'engineer', 'employee'].indexOf(a.role) - ['owner', 'engineer', 'employee'].indexOf(b.role) || String(a.name).localeCompare(String(b.name), 'el'));
+function saveAccess(uid, v) {
+  const cur = ext.access[uid] || {};
+  const role = v.role || cur.role || 'employee';
+  const body = { role, name: v.name ?? cur.name ?? '', email: v.email ?? cur.email ?? '', worker: v.worker ?? cur.worker ?? '',
+    mods: role === 'owner' ? modsFor('owner') : (v.mods || cur.mods || modsFor(role)), at: cur.at || Date.now(), upd: Date.now() };
+  ext.access = { ...ext.access, [uid]: body };
+  directWrite('set', `access/${uid}`, body);
+  // Σύνδεση με καρτέλα εργαζομένου: από εδώ παίρνει τις μέρες του και περνάνε τα τιμολόγια/δηλώσεις του
+  commit([M('meta/links', { items: { [uid]: { workerId: body.worker || '', name: body.name || '' } } })]);
+  setTimeout(syncStaff, 300);
+}
+function adminSet(uid, what, val) {
+  const cur = ext.access[uid]; if (!cur) return;
+  if (what === 'role') {
+    if (val === 'owner') return confirmModal({ title: `Ιδιοκτήτης ο/η ${esc(cur.name || 'χρήστης')};`, ok: 'Ναι, ιδιοκτήτης',
+      body: '<p>Ο ιδιοκτήτης βλέπει και αλλάζει <b>όλα</b> τα δεδομένα: έργα, κόστη, μισθούς, αντίγραφα. Μόνο εσύ (Super Admin) αλλάζεις δικαιώματα.</p>',
+      onOk: () => { saveAccess(uid, { role: 'owner' }); render(); toast('✓ Έγινε ιδιοκτήτης'); } });
+    saveAccess(uid, { role: val, mods: modsFor(val) }); render(); return toast(`✓ Ρόλος: ${UROLES[val]} (οι ενότητες πήραν τις προεπιλογές του ρόλου)`);
+  }
+  if (what === 'worker') { saveAccess(uid, { worker: val }); render(); return toast(val ? '✓ Συνδέθηκε με την καρτέλα' : 'Χωρίς καρτέλα εργαζομένου'); }
+  if (what === 'mod') { const mods = { ...(cur.mods || modsFor(cur.role)) }; mods[val] = !mods[val]; saveAccess(uid, { mods }); render(); }
+}
+function adminRemove(uid) {
+  const cur = ext.access[uid] || {};
+  confirmModal({ title: `Αφαίρεση πρόσβασης: ${esc(cur.name || 'χρήστης')};`, ok: 'Αφαίρεση', danger: true,
+    body: '<p>Δεν θα βλέπει τίποτα στην εφαρμογή. Ό,τι έχει ήδη εγκριθεί (μέρες, τιμολόγια) μένει. Μπορεί να ξαναστείλει αίτημα.</p>',
+    onOk: () => { const n = { ...ext.access }; delete n[uid]; ext.access = n; directWrite('del', `access/${uid}`); directWrite('del', `pending/${uid}`);
+      commit([M('meta/links', { items: { [uid]: null } })]); scheduleStaffSync(); render(); toast('Η πρόσβαση αφαιρέθηκε', 'warn'); } });
+}
+function approveJoin(uid) {
+  const r = ext.joins[uid] || {};
+  const sel = $('#jr-role-' + uid), wsel = $('#jr-w-' + uid);
+  const role = sel ? sel.value : 'employee'; let worker = wsel ? wsel.value : '';
+  const go2 = () => {
+    if (worker === '__new') {
+      worker = uid_(); const parts = String(r.name || 'Εργαζόμενος').trim().split(/\s+/);
+      commit([opWorker(worker, workerBody({ first: parts.shift(), last: parts.join(' '), name: r.name || 'Εργαζόμενος', role: role === 'engineer' ? 'Μηχανικοί' : 'Εργατικό δυναμικό', payType: 'daily', cost: 0, created: Date.now() }))]);
+    }
+    saveAccess(uid, { role, name: r.name || '', email: r.email || '', worker, mods: modsFor(role) });
+    render(); toast(`✓ Εγκρίθηκε: ${r.name || 'χρήστης'} ως ${UROLES[role]}`);
+  };
+  if (role === 'owner') return confirmModal({ title: 'Έγκριση ως ιδιοκτήτης;', ok: 'Ναι', body: '<p>Θα βλέπει και θα αλλάζει όλα τα δεδομένα της επιχείρησης.</p>', onOk: go2 });
+  go2();
+}
+/* Μία φορά: παλιοί «πλήρης πρόσβαση» → Ιδιοκτήτες, παλιοί συνδεδεμένοι εργαζόμενοι → Εργαζόμενοι */
+let accessMigrated = false;
+function migrateAccess() {
+  if (accessMigrated || !isSuperAdmin || !booted || !ext.accessLoaded || !loaded.has('meta')) return;
+  accessMigrated = true;
+  const full = (docs['meta/access'] || {}).full || {};
+  Object.entries(full).forEach(([uid, v]) => { if (v && !ext.access[uid]) saveAccess(uid, { role: 'owner', name: v.name || '' }); });
+  state.links.forEach(l => { if (!ext.access[l.uid]) saveAccess(l.uid, { role: 'employee', name: l.name || '', worker: l.workerId || '', mods: modsFor('employee') }); });
+}
+function adminHTML() {
+  migrateAccess();
+  const reqs = joinRequests(), users = accessList();
+  const linked = new Set(users.map(u => u.worker).filter(Boolean));
+  const wOpts = (sel, mine) => `<option value="">— Χωρίς καρτέλα —</option>` + state.workers.filter(w => w.id === sel || !linked.has(w.id)).map(w => `<option value="${w.id}" ${w.id === sel ? 'selected' : ''}>${esc(w.name)} · ${esc(w.role)}</option>`).join('') + (mine ? `<option value="__new">＋ Νέα καρτέλα με αυτό το όνομα</option>` : '');
+  const roleSel = (id, val, on) => `<select ${id ? `id="${id}"` : ''} class="inp !w-auto !py-1.5" ${on || ''}>${Object.entries(UROLES).map(([k, l]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const sw = (uid, k, on, dis) => `<button type="button" ${dis ? 'disabled' : ''} onclick="adminSet('${uid}','mod','${k}')" class="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${on ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-400'} ${dis ? 'opacity-70 cursor-default' : 'hover:shadow-sm'}">
+      <span class="relative inline-block w-7 h-4 rounded-full ${on ? 'bg-emerald-500' : 'bg-slate-300'}"><span class="absolute top-0.5 ${on ? 'left-3.5' : 'left-0.5'} w-3 h-3 rounded-full bg-white shadow transition-all"></span></span>${MODS.find(m => m[0] === k)[1]}</button>`;
+  const roleTone = { owner: 'bg-amber-100 text-amber-900', engineer: 'bg-violet-100 text-violet-800', employee: 'bg-slate-100 text-slate-700' };
+  return pageHeader('Χρήστες & δικαιώματα', 'Μόνο εσύ (Super Admin) βλέπεις αυτή τη σελίδα. Οι αλλαγές ισχύουν αμέσως και ελέγχονται και από τη βάση δεδομένων.') + `
+  ${reqs.length ? `<section class="card border-amber-300 mb-6 fade-in overflow-hidden"><div class="px-5 py-3.5 bg-amber-50 border-b border-amber-200 font-bold text-amber-900">Νέα αιτήματα (${reqs.length})</div>
+    <div class="divide-y divide-slate-100">${reqs.map(r => `<div class="p-4 flex flex-wrap items-center gap-2">
+      <div class="min-w-0 flex-1 basis-48"><div class="font-semibold">${esc(r.name || 'Χωρίς όνομα')}</div><div class="text-xs text-slate-400">${esc(r.email || '')}${r.at ? ' · ' + dmy(iso(new Date(r.at))) : ''}</div></div>
+      ${roleSel('jr-role-' + r.uid, 'employee')}
+      <select id="jr-w-${r.uid}" class="inp !w-auto !py-1.5 max-w-[220px]">${wOpts('', true)}</select>
+      <button class="btn btn-primary !py-1.5" onclick="approveJoin('${r.uid}')">✓ Έγκριση</button>
+      <button class="btn btn-ghost !py-1.5 !text-rose-600" onclick="dismissJoin('${r.uid}')">Απόρριψη</button></div>`).join('')}</div></section>` : ''}
+  <section class="card mb-6 fade-in overflow-hidden">
+    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-2"><h3 class="font-bold">Χρήστες (${users.length + 1})</h3></div>
+    <div class="divide-y divide-slate-100">
+      <div class="p-4 flex flex-wrap items-center gap-2"><div class="min-w-0 flex-1"><div class="font-semibold">${esc(myName || 'Εσύ')} <span class="ml-1 rounded-full bg-slate-900 text-white px-2 py-0.5 text-[11px] font-bold">Super Admin</span></div><div class="text-xs text-slate-400">${esc(window.__fbEmail || '')} · βλέπει και διαχειρίζεται τα πάντα</div></div></div>
+      ${users.map(u => { const own = u.role === 'owner', mods = own ? modsFor('owner') : (u.mods || modsFor(u.role)), w = state.workers.find(x => x.id === u.worker);
+        return `<div class="p-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="min-w-0 flex-1 basis-48"><div class="font-semibold">${esc(u.name || 'Χωρίς όνομα')} <span class="ml-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${roleTone[u.role]}">${UROLES[u.role]}</span></div>
+            <div class="text-xs text-slate-400">${esc(u.email || '')}${w ? ' · καρτέλα: ' + esc(w.name) : ''}</div></div>
+          ${roleSel('', u.role, `onchange="adminSet('${u.uid}','role',this.value)"`)}
+          ${own ? '' : `<select class="inp !w-auto !py-1.5 max-w-[220px]" title="Καρτέλα εργαζομένου (για «Οι μέρες μου»)" onchange="adminSet('${u.uid}','worker',this.value)">${wOpts(u.worker || '', false)}</select>`}
+          <button class="btn btn-ghost !py-1.5 !text-rose-600" onclick="adminRemove('${u.uid}')">Αφαίρεση</button>
+        </div>
+        <div class="flex flex-wrap gap-1.5 mt-3">${MODS.filter(([k]) => !own || (k !== 'me' && k !== 'myinv')).map(([k]) => sw(u.uid, k, !!mods[k], own)).join('')}</div>
+        ${own ? '<p class="text-[11px] text-slate-400 mt-1.5">Ο ιδιοκτήτης βλέπει πάντα όλες τις ενότητες. Για να του κλείσεις κάποια, άλλαξε τον ρόλο του.</p>' : ''}
+        ${!own && mods.me && !u.worker ? '<p class="text-[11px] text-amber-700 mt-1.5">Για «Οι μέρες μου» διάλεξε την καρτέλα εργαζομένου του.</p>' : ''}
+      </div>`; }).join('') || ''}
+      ${!users.length ? '<p class="p-4 text-sm text-slate-400">Δεν υπάρχουν άλλοι χρήστες ακόμα. Στείλε τη διεύθυνση της σελίδας· όταν μπουν, θα δεις το αίτημά τους εδώ.</p>' : ''}
+    </div></section>
+  <section class="card p-5 fade-in">
+    <h3 class="font-bold mb-3">Τι βλέπει κάθε ρόλος (προεπιλογή)</h3>
+    <div class="overflow-x-auto"><table class="tbl w-full text-sm"><thead><tr><th>Ενότητα</th>${Object.values(UROLES).map(l => `<th class="text-center">${l}</th>`).join('')}</tr></thead><tbody>
+      ${MODS.map(([k, l, d]) => `<tr><td><b>${l}</b>${d ? `<div class="text-xs text-slate-400">${d}</div>` : ''}</td>${Object.keys(UROLES).map(r => `<td class="text-center">${k === 'me' || k === 'myinv' ? (r === 'owner' ? '—' : (ROLE_DEF[r].includes(k) ? '✓' : '')) : (ROLE_DEF[r].includes(k) ? '<span class="text-emerald-600 font-bold">✓</span>' : '<span class="text-slate-300">—</span>')}</td>`).join('')}</tr>`).join('')}
+      <tr><td><b>Δεδομένα & αντίγραφα</b></td><td class="text-center text-slate-300">—</td><td class="text-center text-slate-300">—</td><td class="text-center"><span class="text-emerald-600 font-bold">✓</span></td></tr>
+      <tr><td><b>Χρήστες & δικαιώματα</b></td><td colspan="3" class="text-center text-xs text-slate-500">μόνο Super Admin</td></tr>
+    </tbody></table></div>
+    <p class="text-xs text-slate-500 mt-3">Οι διακόπτες ανά χρήστη ανοίγουν ή κλείνουν ενότητες πέρα από την προεπιλογή του ρόλου του. Αν αλλάξεις ρόλο, οι διακόπτες γυρνούν στην προεπιλογή του νέου ρόλου.</p>
+  </section>`;
 }
 function linkAccount(uid) {
   const r = ext.joins[uid]; const sel = document.getElementById('lk-' + uid); if (!r || !sel) return;
@@ -4129,7 +4261,7 @@ function linkAccount(uid) {
 function dismissJoin(uid) {
   confirmModal({ title: 'Απόρριψη αιτήματος;', ok: 'Απόρριψη', danger: true,
     body: '<p>Το αίτημα σβήνεται. Ο χρήστης μπορεί να στείλει νέο αίτημα αν ανοίξει ξανά τη σελίδα· για να μην έχει καθόλου πρόσβαση, αφαίρεσέ τον και από την Κοινοποίηση.</p>',
-    onOk: () => { delete ext.joins[uid]; directWrite('del', `pending/${uid}`); renderAccess(); updateNavBadge(); } });
+    onOk: () => { delete ext.joins[uid]; directWrite('del', `pending/${uid}`); render(); updateNavBadge(); } });
 }
 function unlinkAccount(uid) {
   const l = linkOf(uid); const w = l && state.workers.find(x => x.id === l.workerId);
@@ -4147,10 +4279,11 @@ const NO_WRITE_HTML = `<div class="card p-6 md:p-8 max-w-xl fade-in border-rose-
       <p class="text-sm text-slate-600 mt-2">Ζήτα από τον διαχειριστή να αλλάξει το δικαίωμά σου στην <b>Κοινοποίηση</b> σε <b>Contributor</b> και μετά άνοιξε ξανά τη σελίδα.</p></div>`;
 const emp = { staff: null, catalog: null, joined: null, items: {}, days: {}, loaded: new Set(), month: ym(today()) };
 function employeeStart() {
-  const done = k => () => { emp.loaded.add(k); if (!booted && emp.loaded.size >= 5) boot(); };
+  const done = k => () => { emp.loaded.add(k); maybeBoot(); };
   listenExtra(`pending/${myUid}/days`, false, m => { emp.days = m; empChanged(); }, done('days'));
-  if (canWrite) listenExtra('meta/access', true, d => { if (d && d.full && d.full[myUid] && !emp.fullNotified) { emp.fullNotified = true;
-    openModal(`<h3 class="text-lg font-bold mb-2">✓ Πήρες πλήρη πρόσβαση</h3><p class="text-sm text-slate-500 mb-5">Άνοιξε ξανά τη σελίδα για να δεις όλη την εφαρμογή.</p><div class="flex justify-end"><button class="btn btn-primary" onclick="location.reload()">Άνοιγμα</button></div>`); } });
+  // Ενότητες που του έχει ανοίξει ο Super Admin: φορτώνονται μόνο αυτά που επιτρέπονται
+  [...myMods].forEach(k => (MOD_PATHS[k] || []).forEach(p => staffPaths.add(p)));
+  staffPaths.forEach(p => listen(p, p.startsWith('meta/') || p.startsWith('shared/')));
   listenExtra(`staff/${myUid}`, true, d => { emp.staff = d; empChanged(); }, done('staff'));
   listenExtra('shared/catalog', true, d => { emp.catalog = d; applyCatalog(); empChanged(); }, done('cat'));
   listenExtra(`pending/${myUid}`, true, d => { emp.joined = d; empChanged(); }, done('join'));
@@ -4159,8 +4292,35 @@ function employeeStart() {
 }
 function applyCatalog() {
   const c = emp.catalog || {};
-  state.projects = (c.projects || []).map(([id, name, color]) => ({ id, name, color, addr: '' }));
-  state.suppliers = (c.suppliers || []).map(n => ({ id: 'c', name: n }));
+  if (!staffPaths.has('meta/projects')) state.projects = (c.projects || []).map(([id, name, color]) => ({ id, name, color, addr: '' }));
+  if (!staffPaths.has('meta/suppliers')) state.suppliers = (c.suppliers || []).map(n => ({ id: 'c', name: n }));
+}
+/* Αν αλλάξουν τα δικαιώματά μου ενώ η σελίδα είναι ανοιχτή → ξαναφόρτωση */
+function watchMyAccess() {
+  if (isSuperAdmin || !myUid) return;
+  const sig = JSON.stringify(myAccess || null);
+  listenExtra(`access/${myUid}`, true, d => {
+    if (JSON.stringify(d || null) === sig || window.__accessPrompt) return;
+    window.__accessPrompt = true;
+    const gained = d && !myAccess;
+    openModal(`<h3 class="text-lg font-bold mb-2">${gained ? '✓ Ο λογαριασμός σου εγκρίθηκε' : 'Τα δικαιώματά σου άλλαξαν'}</h3>
+      <p class="text-sm text-slate-500 mb-5">Ο διαχειριστής άλλαξε τι βλέπεις στην εφαρμογή. Άνοιξε ξανά τη σελίδα για να ισχύσουν.</p>
+      <div class="flex justify-end"><button class="btn btn-primary" onclick="location.reload()">Άνοιγμα ξανά</button></div>`);
+    modalLocked = true;
+  });
+}
+function setupStaffNav() {
+  const nav = document.querySelector('nav');
+  const mk = (key, label, svg) => `<button class="nav-btn" data-nav="${key}" onclick="go('${key}')">${svg}<span class="whitespace-nowrap">${label}</span></button>`;
+  const top = (myMods.has('me') ? mk('me', 'Οι μέρες μου', '<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>') : '')
+    + (myMods.has('myinv') ? mk('myinv', 'Τιμολόγια αγορών', '<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg>') : '');
+  nav.insertAdjacentHTML('afterbegin', top);
+  nav.querySelectorAll('[data-nav]').forEach(b => { const k = b.dataset.nav; if (k === 'me' || k === 'myinv') return; if (!staffCan(k)) b.remove(); });
+  // Λίγες ενότητες: όλες φαίνονται απευθείας, χωρίς «Περισσότερα»
+  const more = $('#navMore');
+  if (more && nav.querySelectorAll('[data-nav]').length <= 6) { [...more.querySelectorAll('[data-nav]')].forEach(b => nav.insertBefore(b, $('#navMoreBtn'))); }
+  if (more && !more.querySelector('[data-nav]')) { $('#navMoreBtn')?.remove(); more.remove(); }
+  const sub = document.querySelector('aside .hidden.md\\:block .text-\\[11px\\]'); if (sub) sub.textContent = myAccess ? (UROLES[myAccess.role] || 'Χρήστης') : 'Χώρος εργαζομένου';
 }
 function empChanged() { if (!booted) return; if (busyIn('#main form')) return; render(); }
 function setupEmployeeNav() {
@@ -4175,7 +4335,8 @@ function setupEmployeeNav() {
   const sub = document.querySelector('aside .hidden.md\\:block .text-\\[11px\\]'); if (sub) sub.textContent = 'Χώρος εργαζομένου';
 }
 function employeeGateHTML() {
-  if (emp.staff) return '';
+  if (myAccess) return emp.staff ? '' : `<div class="card p-6 md:p-8 max-w-xl fade-in"><h2 class="text-xl font-extrabold">Δεν υπάρχουν ακόμα μέρες</h2>
+      <p class="text-sm text-slate-500 mt-2">Ο λογαριασμός σου δεν έχει συνδεθεί ακόμα με καρτέλα εργαζομένου. Μόλις τον συνδέσει ο διαχειριστής, θα βλέπεις εδώ πού και πότε δούλεψες.</p></div>`;
   if (canWrite === false) return NO_WRITE_HTML;
   const first = (myName || '').split(' ')[0];
   if (emp.joined) return `<div class="card p-6 md:p-8 max-w-xl fade-in">
@@ -4194,7 +4355,7 @@ function employeeGateHTML() {
 function sendJoin(e) {
   e.preventDefault();
   const name = $('#jName').value.trim(); if (!name) return;
-  const body = { name, at: Date.now() };
+  const body = { name, email: window.__fbEmail || '', at: Date.now() };
   db.doc(`pending/${myUid}`).set(body).then(() => { emp.joined = body; render(); toast('✓ Το αίτημα στάλθηκε'); },
     e => { canWrite = false; render(); toast('Το αίτημα δεν στάλθηκε: ' + (e && e.message ? e.message : 'δεν έχεις δικαίωμα'), 'err'); });
 }
@@ -4290,7 +4451,7 @@ function empWithdrawDay(d) {
   closeModal(); render(); toast('Η δήλωση ακυρώθηκε', 'warn');
 }
 function myInvHTML() {
-  const gate = employeeGateHTML(); if (gate) return pageHeader('Τιμολόγια', 'Αποστολή τιμολογίων για έγκριση') + gate;
+  const gate = myAccess ? '' : employeeGateHTML(); if (gate) return pageHeader('Τιμολόγια', 'Αποστολή τιμολογίων για έγκριση') + gate;
   const opts = `<option value="">— Επίλεξε έργο —</option>` + projSorted().map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const mine = Object.entries(emp.items).filter(([, v]) => v).map(([id, v]) => ({ id, ...v })).sort((a, b) => (b.at || 0) - (a.at || 0));
   const chip = v => v.status === 'approved' ? '<span class="rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-xs font-semibold">Εγκρίθηκε</span>'
@@ -4349,7 +4510,7 @@ function boot() {
   if (booted) return;
   booted = true; setSync();
   go(ui.view); window.booted = true;
-  if (role === 'owner') { updateNavBadge(); scheduleStaffSync(); setTimeout(notifPopup, 600); }
+  if (role === 'owner') { updateNavBadge(); scheduleStaffSync(); setTimeout(notifPopup, 600); if (isSuperAdmin) setTimeout(migrateAccess, 1500); }
 }
 async function init() {
   try { if (!isMobile() && localStorage.getItem('ergologio-navmore') === '1') setNavMore(true); } catch (e) {}
@@ -4362,22 +4523,22 @@ async function init() {
     db = ns; mode = 'cloud'; setSync('ok');
     try { userNs = await window.claude.use('user'); } catch (e) { userNs = null; }
     if (userNs) {
-      let owner = true;
-      try { owner = await userNs.isOwner(); } catch (e) {}
+      let sup = false;
+      try { sup = await userNs.isOwner(); } catch (e) {}
       try { myUid = await userNs.id(); } catch (e) {}
       try { const me = await userNs.me(); myName = (me && me.name) || ''; } catch (e) {}
-      let admin = false;
-      if (!owner) { try { admin = !!(await userNs.canEdit()); } catch (e) { admin = false; } }
-      // Editor: πλήρης πρόσβαση μόνο αν του την έδωσε ο ιδιοκτήτης (meta/access)· αλλιώς βλέπει ως εργαζόμενος
-      let full = false;
-      if (!owner && admin && myUid) { try { const a = await db.doc('meta/access').get(); full = !!(a.exists && a.data() && a.data().full && a.data().full[myUid]); } catch (e) {} }
-      if (!owner && admin && full) { role = 'owner'; realOwner = false; }
-      else if (!owner && myUid) { role = 'employee'; try { canWrite = await userNs.can('data.write'); } catch (e) { canWrite = null; } }
-      else if (!owner) { $('#main').innerHTML = `<div class="card p-6 max-w-lg">Για να χρησιμοποιήσεις τη σελίδα πρέπει να είσαι συνδεδεμένος στον λογαριασμό σου.</div>`; return; }
+      if (sup) { role = 'owner'; realOwner = true; isSuperAdmin = true; }
+      else if (myUid) {
+        try { const a = await db.doc(`access/${myUid}`).get(); myAccess = a.exists ? a.data() : null; } catch (e) { myAccess = null; }
+        if (myAccess && myAccess.role === 'owner') { role = 'owner'; realOwner = false; }
+        else { role = 'employee'; myMods = new Set(Object.entries((myAccess && myAccess.mods) || {}).filter(([, v]) => v).map(([k]) => k)); }
+      } else { $('#main').innerHTML = `<div class="card p-6 max-w-lg">Για να χρησιμοποιήσεις τη σελίδα πρέπει να είσαι συνδεδεμένος στον λογαριασμό σου.</div>`; return; }
     }
+    watchMyAccess();
     if (role === 'employee') {
-      ui.view = 'me'; setupEmployeeNav(); employeeStart();
+      ui.view = firstStaffView() || 'me'; setupStaffNav(); employeeStart();
     } else {
+      if (isSuperAdmin) $('#navAdmin')?.classList.remove('hidden');
       listen('meta', false); listen('inv', false); listen('att', false); listen('sal', false); listen('car', false); listen('thr', false);
       ownerExtras();
       setTimeout(() => { if (!booted) { toast('Η φόρτωση αργεί· εμφανίζονται όσα έχουν έρθει μέχρι τώρα.', 'warn'); boot(); } }, 15000);

@@ -26,8 +26,6 @@ R("""<script>
 R('\ninit();\n</script>', '\nwindow.__fbReady.then(init);\n</script>')
 R("'Η ανάγνωση με AI δουλεύει μόνο όταν η σελίδα είναι ανοιχτή μέσα στο Claude'", "'Η ανάγνωση PDF με AI θα ενεργοποιηθεί σε επόμενη ενημέρωση· προς το παρόν πέρασε τα τιμολόγια από τη φόρμα ή από Excel'")
 R("αποθηκεύεται αυτόματα στον λογαριασμό σου στο Claude", "αποθηκεύεται αυτόματα στη βάση σου (Google Firebase)")
-R("""      <li>Μοιράσου τη σελίδα από την <b>Κοινοποίηση</b> με το email του και δικαίωμα <b>Editor</b>. <span class="text-rose-600">Με Viewer ή Commenter δεν μπορεί να στείλει τίποτα.</span></li>""",
-  """      <li>Στείλε στον εργαζόμενο τη διεύθυνση της σελίδας. Μπαίνει με τον λογαριασμό Google του ή φτιάχνει λογαριασμό με email και κωδικό.</li>""")
 R("if (isObj(d.extra)) BACKUP_EXTRA.forEach(k => {", "if (isObj(d.extra)) BACKUP_EXTRA.filter(k => !(d.version < 6 && ['meta/links', 'meta/access', 'meta/notif'].includes(k))).forEach(k => {")
 R("const data = { app: 'ergologio', version: 5,", "const data = { app: 'ergologio', version: 6,")
 R("    : syncState === 'saving' ? ['bg-amber-400 animate-pulse', 'Αποθήκευση…']",

@@ -106,7 +106,7 @@ setPersistence(auth, browserLocalPersistence).catch(() => {});
 let started = false;
 onAuthStateChanged(auth, u => {
   if (!u) { if (started) return location.reload(); gate.hidden = false; document.getElementById('agSpin').hidden = true; document.getElementById('agBox').hidden = false; return; }
-  me = u; gate.hidden = true;
+  me = u; window.__fbEmail = u.email || ''; gate.hidden = true;
   if (started) return; started = true;
   const who = document.getElementById('whoAmI');
   if (who) { who.innerHTML = `<span class="truncate">${(u.displayName || u.email || '').replace(/[<>&"]/g, '')}</span><button class="ml-auto shrink-0 underline hover:text-white" onclick="fbSignOut()">Αποσύνδεση</button>`; who.hidden = false; }
