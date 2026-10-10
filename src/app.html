@@ -645,6 +645,7 @@ document.addEventListener('keydown', e => {
   const el = e.target; if (!el || !el.matches || !el.matches('input,select')) return;
   if (['checkbox', 'radio', 'file', 'button', 'submit', 'date'].includes(el.type)) return;
   const form = el.closest('form'); if (!form || form.dataset.noadvance !== undefined) return;
+  if (e.key === ' ' && isTextIn(el)) return;   // σε ονόματα/κείμενα το Space είναι απλώς κενό· αποθήκευση μόνο με το κουμπί ή Enter
   if (el.getAttribute('role') === 'combobox') {
     const box = $('#' + el.id + 'Drop');
     if (e.key === 'Enter' && box && !box.hidden && supItems.length && supIdx >= 0) return;   // διαλέγει από τη λίστα
@@ -2091,8 +2092,11 @@ function workerModal(id) {
   setTimeout(() => $('#wFirst') && $('#wFirst').focus(), 50);
 }
 /* Enter (ή κενό, όπου επιτρέπεται) πηγαίνει στο επόμενο πεδίο αντί να υποβάλει τη φόρμα */
+/* Πεδίο κειμένου (όνομα, προμηθευτής, σημείωση…): εκεί το Space γράφει κενό. Σε αριθμούς/ημερομηνίες συνεχίζει να πηγαίνει στο επόμενο. */
+const isTextIn = el => el && el.tagName === 'INPUT' && ['text', 'search', 'email', ''].includes(el.type || '') && !['decimal', 'numeric'].includes(el.inputMode) && !el.classList.contains('date-in');
 function nextField(e, id, onSpace) {
   if (e.isComposing) return;
+  if (e.key === ' ' && isTextIn(e.target)) return;
   if (e.key === 'Enter' || (onSpace && e.key === ' ' && e.target.value.trim())) {
     e.preventDefault();
     let el = $('#' + id);
