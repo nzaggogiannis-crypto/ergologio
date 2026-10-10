@@ -4107,7 +4107,7 @@ function approvePending(uid, id, override) {
   ops.push(opInvoice({ id: invId, date: v.date, invNo: v.invNo, supName, amount: v.amount, project: v.project }));
   commit(ops);
   dcInv({ kind: 'exp', date: v.date, invNo: v.invNo, supName, amount: v.amount, project: v.project }, `Εγκρίθηκε τιμολόγιο από ${(linkOf(uid) || {}).name || p.by || 'εργαζόμενο'}`);
-  discord('staffinv', `✅ Εγκρίθηκε τιμολόγιο: ${supName}`, [], [['Από', (linkOf(uid) || {}).name || p.by || '—'], ['Αξία', fmt.format(v.amount)], ['Έργο', proj(v.project).name]]);
+  discord('inv', `✅ Εγκρίθηκε τιμολόγιο: ${supName}`, [], [['Από', (linkOf(uid) || {}).name || p.by || '—'], ['Αξία', fmt.format(v.amount)], ['Έργο', proj(v.project).name]]);
   const decided = { status: 'approved', decidedAt: Date.now(), invoiceId: invId, final: { date: v.date, invNo: v.invNo, supName, amount: v.amount, projectName: proj(v.project).name } };
   ext.pend[uid][id] = { ...p, ...decided };
   directWrite('merge', `pending/${uid}/items/${id}`, decided);
@@ -4159,7 +4159,7 @@ function rejectPending(e, uid, id) {
   ext.pend[uid][id] = { ...p, ...decided };
   directWrite('merge', `pending/${uid}/items/${id}`, decided);
   closeModal(); extChanged(); toast('Το τιμολόγιο απορρίφθηκε', 'warn');
-  discord('staffinv', `❌ Απορρίφθηκε τιμολόγιο: ${p.supName}`, [decided.reason ? `Λόγος: ${decided.reason}` : ''], [['Από', (linkOf(uid) || {}).name || p.by || '—'], ['Αξία', fmt.format(+p.amount || 0)], ['Ημερομηνία', dmy(p.date)]]);
+  discord('inv', `❌ Απορρίφθηκε τιμολόγιο: ${p.supName}`, [decided.reason ? `Λόγος: ${decided.reason}` : ''], [['Από', (linkOf(uid) || {}).name || p.by || '—'], ['Αξία', fmt.format(+p.amount || 0)], ['Ημερομηνία', dmy(p.date)]]);
 }
 
 /* Πρόσβαση εργαζομένων (σελίδα Δεδομένα) */
@@ -4174,20 +4174,19 @@ function renderAccess() {
 /* ============ DISCORD: αυτόματες ειδοποιήσεις σε κανάλι ============
    Ρύθμιση: meta/discord (ιδιοκτήτες) + αντίγραφο στο shared/notify (για ενέργειες εργαζομένων). Μόνο ο Super Admin την αλλάζει. */
 const DC_EVENTS = [
-  ['inv', '🧾 Τιμολόγια', 'Νέα αγορά, πώληση, προς τρίτους, εισαγωγή από Excel', 'τιμολογια'],
+  ['inv', '🧾 Τιμολόγια', 'Νέα αγορά, πώληση, προς τρίτους, εισαγωγή από Excel, τιμολόγια εργαζομένων (για έγκριση, εγκρίθηκε, απορρίφθηκε)', 'τιμολογια'],
   ['proj', '🏗️ Έργα', 'Νέο έργο, επεξεργασία, σύμβαση, απόκρυψη, διαγραφή', 'εργα'],
-  ['att', '📅 Παρουσίες', 'Δήλωση ημέρας από εργαζόμενο, έγκριση ή απόρριψη', 'παρουσιες'],
-  ['staffinv', '📥 Τιμολόγια εργαζομένων', 'Τιμολόγιο για έγκριση, έγκριση ή απόρριψη', 'τιμολογια-εργαζομενων'],
+  ['att', '📅 Παρουσίες εργαζομένων', 'Δήλωση ημέρας από εργαζόμενο, έγκριση ή απόρριψη', 'παρουσιες'],
   ['remind', '🔔 Υπενθυμίσεις & λήξεις', 'ΚΤΕΟ, ασφάλειες, συμβάσεις, δικές σου υπενθυμίσεις', 'υπενθυμισεις'],
   ['users', '👤 Χρήστες', 'Αίτημα πρόσβασης, έγκριση, αλλαγή ρόλου, αφαίρεση', 'χρηστες'],
 ];
-const DC_COLOR = { inv: 0xf59e0b, proj: 0x0ea5e9, att: 0x8b5cf6, staffinv: 0xa855f7, remind: 0xef4444, users: 0x10b981, test: 0x64748b };
+const DC_COLOR = { inv: 0xf59e0b, proj: 0x0ea5e9, att: 0x8b5cf6, remind: 0xef4444, users: 0x10b981, test: 0x64748b };
 const dcCfg = () => docs['meta/discord'] || docs['shared/notify'] || {};
 const DC_RE = /^https:\/\/(?:(?:canary|ptb)\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/;
 /* Σε ποιο κανάλι πάει κάθε κατηγορία: δικό της webhook, αλλιώς το κύριο. null = κλειστή. */
 function dcRoute(c, ev) {
   if (!c || !c.on) return null;
-  const evs = c.events || {}, on = ev in evs ? evs[ev] : (ev === 'att' || ev === 'staffinv') ? !!evs.staff : false;   // παλιά ρύθμιση «staff»
+  const evs = c.events || {}, on = ev in evs ? evs[ev] : ev === 'att' ? !!evs.staff : false;   // παλιά ρύθμιση «staff»
   if (!on) return null;
   return ((c.urls || {})[ev]) || c.url || null;
 }
@@ -4212,7 +4211,7 @@ const dcInv = (c, label) => discord('inv', `🧾 ${label}: ${c.supName || '—'}
   [['Αξία', fmt.format(+c.amount || 0)], ['Έργο', proj(c.project).name], ['Ημερομηνία', dmy(c.date)], ['Αρ. τιμολογίου', c.invNo || '—'], ['Είδος', (KIND[c.kind] || {}).title || 'Αγορά']]);
 function discordSettingsHTML() {
   const c = docs['meta/discord'] || {}, urls = c.urls || {};
-  const evOn = k => !c.events ? true : (k in c.events ? c.events[k] : (k === 'att' || k === 'staffinv') ? !!c.events.staff : true);
+  const evOn = k => !c.events ? true : (k in c.events ? c.events[k] : k === 'att' ? !!c.events.staff : true);
   const active = !!(c.on && (c.url || Object.values(urls).some(Boolean)));
   return `<section class="card p-5 md:p-6 mb-6 fade-in">
     <div class="flex flex-wrap items-center gap-3 mb-1"><h3 class="font-bold text-lg">💬 Ειδοποιήσεις στο Discord</h3>
@@ -4640,7 +4639,7 @@ function submitEmpInvoice(e) {
     status: 'pending', at: Date.now(), by: (emp.staff && emp.staff.name) || myName };
   emp.items = { ...emp.items, [id]: body };
   directWrite('set', `pending/${myUid}/items/${id}`, body).then(() => {}, () => {});
-  discord('staffinv', `📥 Τιμολόγιο για έγκριση από ${body.by || 'εργαζόμενο'}`, [body.note ? `«${body.note}»` : ''], [['Προμηθευτής', body.supName], ['Αξία', fmt.format(body.amount)], ['Έργο', body.projectName], ['Ημερομηνία', dmy(body.date)]]);
+  discord('inv', `📥 Τιμολόγιο για έγκριση από ${body.by || 'εργαζόμενο'}`, [body.note ? `«${body.note}»` : ''], [['Προμηθευτής', body.supName], ['Αξία', fmt.format(body.amount)], ['Έργο', body.projectName], ['Ημερομηνία', dmy(body.date)]]);
   render(); toast('✓ Στάλθηκε για έγκριση');
 }
 function withdrawEmpInvoice(id) {
