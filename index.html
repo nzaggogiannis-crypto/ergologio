@@ -2631,8 +2631,26 @@ function fuelFormHTML(withCar) {
         <button class="btn btn-primary w-full">＋ Καταχώριση καυσίμου</button>
       </form>`;
 }
+function otherFormHTML(withCar) {
+  const t = ui.carOtherType, untilDef = t === 'kteo' ? addDays(today(), 730) : addDays(today(), 365);
+  const tab = k => `<button type="button" class="px-3 py-1.5 rounded-lg text-sm font-semibold transition ${t === k ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-900'}" onclick="ui.carOtherType='${k}';render()">${CAR_TYPES[k]}</button>`;
+  return `      <div class="${withCar ? 'px-5 pt-4' : 'p-5 border-b border-slate-100'} flex flex-wrap items-center justify-between gap-2"><h3 class="font-bold">🔧 Λοιπά έξοδα</h3>
+        <div class="inline-flex gap-1 p-1 rounded-xl bg-slate-200/70">${['service', 'kteo', 'ins', 'other'].map(tab).join('')}</div></div>
+      <form id="otherForm" class="p-5 space-y-3 ${withCar ? '' : 'border-b border-slate-100 bg-slate-50/60'}" onsubmit="addCarOther(event)">
+        ${withCar ? `<div><label class="lbl" for="coCar">Αυτοκίνητο</label><select id="coCar" class="inp" required onchange="ui.otherCar=this.value"><option value="">— Επίλεξε αυτοκίνητο —</option>${state.cars.map(c => `<option value="${c.id}" ${c.id === ui.otherCar ? 'selected' : ''}>${esc(c.plate)}${c.brand ? ' · ' + esc(c.brand) + ' ' + esc(c.model || '') : ''}</option>`).join('')}</select></div>` : ''}
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0"><label class="lbl" for="coDate">Ημερομηνία</label>${dateField('coDate', today(), t === 'kteo' || t === 'ins' ? 'coDateChanged' : '')}</div>
+          <div class="min-w-0"><label class="lbl" for="coAmt">Ποσό (€)</label><input id="coAmt" type="text" inputmode="decimal" autocomplete="off" step="0.01" min="0" class="inp" placeholder="0,00" required></div>
+        </div>
+        ${t === 'ins' ? `<div><label class="lbl" for="coCompany">Ασφαλιστική</label>${supplierField('coCompany', '', '', 'ins')}</div>` : ''}
+        ${t === 'service' || t === 'other' ? `<div><label class="lbl" for="coNote">${t === 'service' ? 'Τι έγινε / συνεργείο' : 'Περιγραφή'}</label><input id="coNote" class="inp" maxlength="200" placeholder="${t === 'service' ? 'π.χ. Αλλαγή λαδιών · Συνεργείο Παπαδόπουλος' : 'π.χ. Λάστιχα'}"></div>` : ''}
+        ${t === 'kteo' || t === 'ins' ? `<div><label class="lbl" for="coUntil">${t === 'kteo' ? 'Ισχύει έως' : 'Λήγει'}</label>${dateField('coUntil', untilDef)}
+          <p class="text-[11px] text-slate-400 mt-1">${t === 'kteo' ? 'Προτείνεται +2 χρόνια από την ημερομηνία· άλλαξέ το αν χρειάζεται.' : 'Προτείνεται +1 χρόνος· άλλαξέ το αν το συμβόλαιο είναι εξάμηνο.'}</p></div>` : ''}
+        <button class="btn btn-primary w-full">＋ Καταχώριση ${CAR_TYPES[t]}</button>
+      </form>`;
+}
 function carsHTML() {
-  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `<button class="btn btn-ghost" onclick="compareModal()">📊 Σύγκριση & συμπεράσματα</button><button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-primary" onclick="carModal()">＋ Προσθήκη αυτοκινήτου</button>`) + `${state.cars.length ? `<section class="card fade-in mb-6"><div class="px-5 pt-4 font-bold">⛽ Καύσιμα</div>${fuelFormHTML(true)}</section>` : ''}<div id="carsBody"></div>`;
+  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `<button class="btn btn-ghost" onclick="compareModal()">📊 Σύγκριση & συμπεράσματα</button><button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-primary" onclick="carModal()">＋ Προσθήκη αυτοκινήτου</button>`) + `${state.cars.length ? `<div class="grid xl:grid-cols-2 gap-6 items-start mb-6"><section class="card fade-in min-w-0"><div class="px-5 pt-4 font-bold">⛽ Καύσιμα</div>${fuelFormHTML(true)}</section><section class="card fade-in min-w-0">${otherFormHTML(true)}</section></div>` : ''}<div id="carsBody"></div>`;
 }
 /* Θεωρητικό κόστος μεταφοράς (από τα έργα) έναντι πραγματικών εξόδων αυτοκινήτων + διοδίων */
 function transportCompare(y) {
@@ -2770,19 +2788,7 @@ function carHTML() {
       <div id="fuelList"></div>
     </section>
     <section class="card fade-in min-w-0">
-      <div class="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2"><h3 class="font-bold">🔧 Λοιπά έξοδα</h3>
-        <div class="inline-flex gap-1 p-1 rounded-xl bg-slate-200/70">${['service', 'kteo', 'ins', 'other'].map(tab).join('')}</div></div>
-      <form id="otherForm" class="p-5 space-y-3 border-b border-slate-100 bg-slate-50/60" onsubmit="addCarOther(event)">
-        <div class="grid grid-cols-2 gap-3">
-          <div class="min-w-0"><label class="lbl" for="coDate">Ημερομηνία</label>${dateField('coDate', today(), t === 'kteo' || t === 'ins' ? 'coDateChanged' : '')}</div>
-          <div class="min-w-0"><label class="lbl" for="coAmt">Ποσό (€)</label><input id="coAmt" type="text" inputmode="decimal" autocomplete="off" step="0.01" min="0" class="inp" placeholder="0,00" required></div>
-        </div>
-        ${t === 'ins' ? `<div><label class="lbl" for="coCompany">Ασφαλιστική</label>${supplierField('coCompany', '', '', 'ins')}</div>` : ''}
-        ${t === 'service' || t === 'other' ? `<div><label class="lbl" for="coNote">${t === 'service' ? 'Τι έγινε / συνεργείο' : 'Περιγραφή'}</label><input id="coNote" class="inp" maxlength="200" placeholder="${t === 'service' ? 'π.χ. Αλλαγή λαδιών · Συνεργείο Παπαδόπουλος' : 'π.χ. Λάστιχα'}"></div>` : ''}
-        ${t === 'kteo' || t === 'ins' ? `<div><label class="lbl" for="coUntil">${t === 'kteo' ? 'Ισχύει έως' : 'Λήγει'}</label>${dateField('coUntil', untilDef)}
-          <p class="text-[11px] text-slate-400 mt-1">${t === 'kteo' ? 'Προτείνεται +2 χρόνια από την ημερομηνία· άλλαξέ το αν χρειάζεται.' : 'Προτείνεται +1 χρόνος· άλλαξέ το αν το συμβόλαιο είναι εξάμηνο.'}</p></div>` : ''}
-        <button class="btn btn-primary w-full">＋ Καταχώριση ${CAR_TYPES[t]}</button>
-      </form>
+      ${otherFormHTML(false)}
       <div id="otherList"></div>
     </section>
   </div>`;
@@ -2843,11 +2849,12 @@ function addCarOther(e) {
   e.preventDefault();
   const t = ui.carOtherType, date = dmyToIso($('#coDate').value); if (!date) return toast('Η ημερομηνία πρέπει να είναι σε μορφή ΗΗ/ΜΜ/ΕΕΕΕ', 'err');
   const amount = num($('#coAmt').value); if (!(amount > 0)) return toast('Συμπλήρωσε το ποσό', 'err');
-  const x = { id: uid(), carId: ui.carId, type: t, date, amount };
+  const carId = $('#coCar') ? $('#coCar').value : ui.carId; if (!carId) { flash('#coCar'); return toast('Διάλεξε αυτοκίνητο', 'err'); }
+  const x = { id: uid(), carId, type: t, date, amount };
   if (t === 'ins') { const v = $('#coCompany').value.trim(); if (!v) return toast('Συμπλήρωσε την ασφαλιστική', 'err'); const k = KIND.ins.parties().find(p => norm(p.name) === norm(v)); x.company = k ? k.name : v; }
   if (t === 'service' || t === 'other') x.note = $('#coNote').value.trim();
   if (t === 'kteo' || t === 'ins') { x.until = dmyToIso($('#coUntil').value); if (!x.until) return toast('Συμπλήρωσε μέχρι πότε ισχύει (ΗΗ/ΜΜ/ΕΕΕΕ)', 'err'); }
-  commit([opCarExp(x)]); render(); toast(`✓ ${CAR_TYPES[t]} καταχωρήθηκε`);
+  ui.otherCar = carId; commit([opCarExp(x)]); render(); const c = state.cars.find(k => k.id === carId); toast(`✓ ${CAR_TYPES[t]} καταχωρήθηκε${c && ui.view === 'cars' ? ' · ' + c.plate : ''}`);
 }
 function editCarExp(id) {
   const e = state.carExp.find(x => x.id === id); if (!e) return;
