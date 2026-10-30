@@ -298,7 +298,7 @@ const invBody = i => ({ date: i.date, invNo: i.invNo || '', supName: i.supName |
 const OFFICE = 'office';
 const ETYPES = [['mat', 'Υλικά'], ['oth', 'Άλλα'], ['gen', 'Γενικά έξοδα']];
 const etypeLabel = k => (ETYPES.find(x => x[0] === k) || ETYPES[0])[1];
-const EXP_CATS_DEF = ['Φαγητό', 'Καφέδες', 'Ξενοδοχείο', 'Ακτοπλοϊκά', 'Αεροπορικά', 'Δώρα', 'Εξοπλισμός / πάγια', 'Αναλώσιμα γραφείου'];
+const EXP_CATS_DEF = ['Διόδια', 'Φαγητό', 'Καφέδες', 'Ξενοδοχείο', 'Ακτοπλοϊκά', 'Αεροπορικά', 'Δώρα', 'Εξοπλισμός / πάγια', 'Αναλώσιμα γραφείου'];
 const expCats = () => { const extra = Object.values(((docs['meta/expcats'] || {}).items) || {}).filter(v => v && v.name).map(v => String(v.name));
   return [...new Set([...EXP_CATS_DEF, ...extra])]; };
 const opInvoice = (i, del) => M(invDocPath(i.project, i.date), { project: i.project, items: { [i.id]: del ? null : invBody(i) } });
@@ -2650,7 +2650,7 @@ function carEntryModal() {
 }
 const refreshCarEntry = () => { if ($('#carEntry') && $('#modal').classList.contains('flex')) carEntryModal(); else render(); };
 function carsHTML() {
-  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `${state.cars.length ? '<button class="btn btn-primary" onclick="carEntryModal()">＋ Καταχώριση εξόδου</button>' : ''}<button class="btn btn-ghost" onclick="compareModal()">📊 Σύγκριση & συμπεράσματα</button><button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-ghost" onclick="carModal()">＋ Αυτοκίνητο</button>`) + `<div id="carsBody"></div>`;
+  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ και ασφάλειες ανά όχημα', `${state.cars.length ? '<button class="btn btn-primary" onclick="carEntryModal()">＋ Καταχώριση εξόδου</button>' : ''}<button class="btn btn-ghost" onclick="compareModal()">📊 Σύγκριση & συμπεράσματα</button><button class="btn btn-ghost" onclick="carModal()">＋ Αυτοκίνητο</button>`) + `<div id="carsBody"></div>`;
 }
 /* Θεωρητικό κόστος μεταφοράς (από τα έργα) έναντι πραγματικών εξόδων αυτοκινήτων + διοδίων */
 function transportCompare(y) {
@@ -2666,7 +2666,7 @@ function transportCompare(y) {
   }
   const ex = state.carExp.filter(e => e.date.startsWith(y));
   const by = t => ex.filter(e => e.type === t).reduce((s, e) => s + e.amount, 0);
-  const real = { fuel: by('fuel'), toll: by('toll'), service: by('service'), kteo: by('kteo'), ins: by('ins'), other: by('other') };
+  const real = { fuel: by('fuel'), toll: by('toll') + state.invoices.filter(i => i.etype !== 'mat' && i.cat === 'Διόδια' && i.date.startsWith(y)).reduce((s, i) => s + i.amount, 0), service: by('service'), kteo: by('kteo'), ins: by('ins'), other: by('other') };
   real.total = Object.values(real).reduce((s, v) => s + v, 0);
   return { rows, theo, tickets, real, noPrice: rows.filter(r => r.days && !r.carPrice) };
 }
@@ -2711,20 +2711,19 @@ function compareModal() {
 }
 function renderCars() {
   const el = $('#carsBody'); if (!el) return;
-  if (!state.cars.length) { el.innerHTML = tollsSection(today().slice(0, 4)).replace('mt-6', 'mb-6') + `<div class="card p-10 text-center"><div class="text-slate-400 text-sm mb-3">Δεν υπάρχουν αυτοκίνητα.</div><button class="btn btn-primary" onclick="carModal()">＋ Πρόσθεσε το πρώτο</button></div>`; return; }
-  const y = today().slice(0, 4), ex = state.carExp.filter(e => e.date.startsWith(y) && e.carId !== EPASS), tl = tolls().filter(e => e.date.startsWith(y)).reduce((s, e) => s + e.amount, 0);
+  if (!state.cars.length) { el.innerHTML = `<div class="card p-10 text-center"><div class="text-slate-400 text-sm mb-3">Δεν υπάρχουν αυτοκίνητα.</div><button class="btn btn-primary" onclick="carModal()">＋ Πρόσθεσε το πρώτο</button></div>`; return; }
+  const y = today().slice(0, 4), ex = state.carExp.filter(e => e.date.startsWith(y) && e.carId !== EPASS), tl = 0;
   const fuel = ex.filter(e => e.type === 'fuel'), other = ex.filter(e => e.type !== 'fuel');
   const al = carAlerts();
   const card = (label, val, sub) => `<div class="card p-4 md:p-5"><div class="text-[11px] md:text-xs font-semibold text-slate-500 uppercase tracking-wide">${label}</div><div class="text-xl md:text-2xl font-extrabold mt-2 tabular-nums">${val}</div><div class="text-xs text-slate-400 mt-1">${sub}</div></div>`;
   el.innerHTML = `
     ${al.length ? `<div class="card ${al.some(a => a.n < 0) ? 'tint-red' : 'tint-amber'} p-4 mb-4 space-y-1.5">${al.map(a => `<button class="flex items-center gap-2 text-sm text-left w-full hover:underline" onclick="openCar('${a.c.id}')">
         <span class="w-2 h-2 rounded-full ${a.n < 0 ? 'bg-rose-500' : 'bg-amber-500'}"></span><b>${esc(a.c.plate)}</b> · ${CAR_TYPES[a.t]} ${a.n < 0 ? `έληξε στις ${dmy(a.e.until)}` : `λήγει σε ${a.n} ${a.n === 1 ? 'μέρα' : 'μέρες'} (${dmy(a.e.until)})`}</button>`).join('')}</div>` : ''}
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
       ${card('Καύσιμα ' + y, fmt.format(fuel.reduce((s, e) => s + e.amount, 0)), `${fuel.reduce((s, e) => s + e.liters, 0).toLocaleString('el-GR')} λίτρα`)}
       ${card('Λοιπά έξοδα ' + y, fmt.format(other.reduce((s, e) => s + e.amount, 0)), 'service, ΚΤΕΟ, ασφάλειες')}
-      ${card('Διόδια ' + y, fmt.format(tl), 'e-pass')}
-      ${card('Σύνολο ' + y, fmt.format(ex.reduce((s, e) => s + e.amount, 0) + tl), `${state.cars.length} οχήματα + διόδια`)}
-      <div class="col-span-2 lg:col-span-1 grid">${card('Λήξεις (30 ημέρες)', al.length, al.length ? 'δες παραπάνω' : 'όλα εντάξει')}</div>
+      ${card('Σύνολο ' + y, fmt.format(ex.reduce((s, e) => s + e.amount, 0) + tl), `${state.cars.length} οχήματα`)}
+      <div class="grid">${card('Λήξεις (30 ημέρες)', al.length, al.length ? 'δες παραπάνω' : 'όλα εντάξει')}</div>
     </div>
     <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${state.cars.map(c => {
       const ce = ex.filter(e => e.carId === c.id), f = ce.filter(e => e.type === 'fuel');
@@ -2735,7 +2734,7 @@ function renderCars() {
         <div class="grid grid-cols-2 gap-2 mt-4 text-sm">
           <div class="rounded-lg bg-slate-50 p-2.5"><div class="text-[11px] text-slate-500 font-semibold uppercase">Καύσιμα</div><div class="font-bold tabular-nums">${fmt.format(f.reduce((s, e) => s + e.amount, 0))}</div></div>
           <div class="rounded-lg bg-slate-50 p-2.5"><div class="text-[11px] text-slate-500 font-semibold uppercase">Λοιπά</div><div class="font-bold tabular-nums">${fmt.format(ce.filter(e => e.type !== 'fuel').reduce((s, e) => s + e.amount, 0))}</div></div>
-        </div></button>`; }).join('')}</div>` + tollsSection(y);
+        </div></button>`; }).join('')}</div>`;
 }
 function carModal(id) {
   const c = state.cars.find(x => x.id === id) || { brand: '', model: '', plate: '' };
