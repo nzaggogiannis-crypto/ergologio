@@ -803,7 +803,7 @@ function dashboardHTML() {
   return pageHeader('Έργα & Επισκόπηση', 'Έσοδα, κόστος και αποτέλεσμα ανά έργο· πάτα ένα έργο για την καρτέλα του',
       `<button class="btn btn-ghost" onclick="copyDashboard()">📋 Αντιγραφή σε Excel</button>
        <button class="btn btn-primary" onclick="projectModal()">＋ Νέο έργο</button>`) + `
-    <div id="kpis" class="mb-6"></div>
+    <div id="kpis" class="mb-6 empty:hidden"></div>
     <section class="card fade-in">
       <div class="p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
         <h3 class="font-bold">Έργα</h3>
@@ -920,22 +920,7 @@ function renderKpis() {
       ${carAl ? `<button class="flex items-center gap-2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-900 hover:bg-rose-100" onclick="notifMarkSeen(notifUnseen());go('notif')">🔔 ${carAl} ${carAl === 1 ? 'νέα ειδοποίηση' : 'νέες ειδοποιήσεις'} →</button>` : ''}
       ${pend ? `<button class="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 hover:bg-amber-100" onclick="go('invoices')"><span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>${pend} τιμολόγι${pend === 1 ? 'ο περιμένει' : 'α περιμένουν'} έγκριση →</button>` : ''}
       ${reqs ? `<button class="flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-4 py-2.5 text-sm font-semibold text-sky-900 hover:bg-sky-100" onclick="go('data')">${reqs} αίτημ${reqs === 1 ? 'α' : 'ατα'} σύνδεσης εργαζομένου →</button>` : ''}</div>` : '';
-  const t = totals();
-  let Mt = 0, L = 0, N = 0, D = 0, X = 0, R = 0, NS = 0, TR = 0, TH = 0, NT = 0;
-  const hiddenN = state.projects.filter(p => p.hidden).length;
-  state.projects.filter(p => !p.hidden).map(p => t[p.id]).forEach(x => { Mt += x.materials; L += x.labor; N += x.invCount; D += x.days; X += x.extra; R += x.revenue; NS += x.salCount; TR += x.transport; TH += x.thirds; NT += x.thrCount; });
-  const res = R - Mt - L - TR - TH;
-  const kpi = (label, val, sub, accent, cls = '') => `
-    <div class="card p-4 md:p-5 ${cls}"><div class="flex items-center gap-2 text-[11px] md:text-xs font-semibold text-slate-500 uppercase tracking-wide">
-      ${dot(accent, 2)}${label}</div>
-      <div class="text-lg sm:text-xl md:text-2xl font-extrabold mt-2 tabular-nums">${val}</div><div class="text-xs text-slate-400 mt-1">${sub}</div></div>`;
-  el.innerHTML = notice + `<div class="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3 md:gap-4">
-    ${kpi('Έσοδα', fmt.format(R), NS + ' τιμολόγια πωλήσεων', '#059669')}
-    ${kpi('Κόστος υλικών', fmt.format(Mt), N.toLocaleString('el-GR') + ' τιμολόγια αγορών', '#0f172a')}
-    ${kpi('Κόστος εργατικών', fmt.format(L), `${D} ημερομίσθια · έξτρα ${fmt.format(X)}`, '#fbbf24')}
-    ${kpi('Κόστος τρίτων', fmt.format(TH), NT + (NT === 1 ? ' τιμολόγιο' : ' τιμολόγια') + ' προς τρίτους', '#f97316')}
-    ${kpi('Κόστος μεταφορικών', fmt.format(TR), 'αμάξι · ακτοπλοϊκά · αεροπορικά', '#38bdf8')}
-    ${kpi('Αποτέλεσμα', `<span class="${res < 0 ? 'text-rose-600' : 'text-emerald-700'}">${fmt.format(res)}</span>`, `έσοδα − κόστος · ${state.projects.length - hiddenN} έργα${hiddenN ? ` (+${hiddenN} σε απόκρυψη)` : ''}`, res < 0 ? '#e11d48' : '#10b981')}</div>`;
+  el.innerHTML = notice;   // μόνο ειδοποιήσεις· τα κουτιά συνόλων αφαιρέθηκαν
 }
 function sortDash(k) { ui.dashSort = ui.dashSort.key === k ? { key: k, dir: -ui.dashSort.dir } : { key: k, dir: k === 'name' ? 1 : -1 }; renderDashTable(); }
 function renderDashTable() {
