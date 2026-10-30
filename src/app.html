@@ -2164,28 +2164,29 @@ let payScope = null;
 const payTxt = w => w.payType === 'salary' ? `μισθός ${money0.format(w.salary)}/μήνα` : `μεροκάματο ${fmt.format(w.cost)}`;
 function payScopeModal(id, data) {
   const old = state.workers.find(w => w.id === id);
-  payScope = { id, data, mode: 'future' };
+  payScope = { id, data, mode: 'future', sel: new Set(), cm: ym(today()) };
   openModal(`<h3 class="text-lg font-bold mb-1">Πού να εφαρμοστεί η αλλαγή;</h3>
     <p class="text-sm text-slate-500 mb-4">${esc(data.name)}: ${payTxt(old)} → <b class="text-slate-900">${payTxt(data)}</b></p>
     <div class="space-y-2" onchange="payScopeChanged()">
-      ${[['future', 'Από σήμερα και μετά', 'Οι μέρες πριν από σήμερα κρατούν την παλιά τιμή.'], ['all', 'Διόρθωση σε όλες τις μέρες', 'Αλλάζουν και όλες οι μέρες που έχουν ήδη καταχωρηθεί.'], ['range', 'Σε διάστημα', 'Μόνο οι μέρες από – έως.']]
+      ${[['future', 'Από σήμερα και μετά', 'Οι μέρες πριν από σήμερα κρατούν την παλιά τιμή.'], ['all', 'Διόρθωση σε όλες τις μέρες', 'Αλλάζουν και όλες οι μέρες που έχουν ήδη καταχωρηθεί.'], ['range', 'Σε διάστημα ή επιλεγμένες μέρες', 'Από – έως, και πάτα στο ημερολόγιο όποια μέρα θέλεις.']]
         .map(([v, l, d], i) => `<label class="flex gap-3 rounded-lg border border-slate-200 px-3 py-2.5 cursor-pointer has-[:checked]:border-slate-900">
           <input type="radio" name="psMode" value="${v}" class="mt-1 accent-slate-900" ${i ? '' : 'checked'}><span><span class="font-medium">${l}</span><span class="block text-xs text-slate-500">${d}</span></span></label>`).join('')}
     </div>
     <div id="psRange" class="hidden grid-cols-2 gap-3 mt-3">
-      <div class="min-w-0"><label class="lbl" for="psFrom">Από</label>${dateField('psFrom', ym(today()) + '-01', 'payScopeChanged')}</div>
-      <div class="min-w-0"><label class="lbl" for="psTo">Έως</label>${dateField('psTo', today(), 'payScopeChanged')}</div>
+      <div class="min-w-0"><label class="lbl" for="psFrom">Από</label>${dateField('psFrom', ym(today()) + '-01', 'psRangeSet')}</div>
+      <div class="min-w-0"><label class="lbl" for="psTo">Έως</label>${dateField('psTo', today(), 'psRangeSet')}</div>
+      <div id="psCal" class="col-span-2"></div>
     </div>
     <p id="psPreview" class="text-sm text-slate-600 mt-4"></p>
     <p class="text-xs text-slate-400 mt-1">Τα έξτρα (υπερωρίες κ.λπ.) δεν αλλάζουν.</p>
     <div class="flex gap-2 justify-end mt-5"><button class="btn btn-ghost" onclick="closeModal()">Άκυρο</button><button class="btn btn-primary" onclick="applyPayScope()">Εφαρμογή</button></div>`);
-  payScopeChanged();
+  psRangeSet();
 }
 function payScopeDays() {
   const { id, mode } = payScope, t = today();
   const from = mode === 'future' ? t : mode === 'range' ? dmyToIso($('#psFrom').value) : '';
   const to = mode === 'range' ? dmyToIso($('#psTo').value) : '';
-  if (mode === 'range' && (!from || !to)) return null;
+  if (mode === 'range') return state.attendance.filter(a => a.workerId === id && payScope.sel.has(a.date));
   return state.attendance.filter(a => a.workerId === id && (!from || a.date >= from) && (!to || a.date <= to));
 }
 const newDayCost = (d, a) => d.payType === 'salary' ? r2(d.salary / workdaysIn(ym(a.date))) : d.cost;
@@ -2194,13 +2195,37 @@ function payScopeChanged() {
   const m = document.querySelector('input[name=psMode]:checked'); payScope.mode = m ? m.value : 'future';
   $('#psRange').classList.toggle('hidden', payScope.mode !== 'range'); $('#psRange').classList.toggle('grid', payScope.mode === 'range');
   const list = payScopeDays(), el = $('#psPreview'); if (!el) return;
-  if (!list) { el.textContent = 'Συμπλήρωσε τις ημερομηνίες (ΗΗ/ΜΜ/ΕΕΕΕ).'; return; }
+  if (payScope.mode === 'range') renderPsCal();
   const diff = list.reduce((s, a) => s + newDayCost(payScope.data, a) - a.cost, 0);
   el.innerHTML = list.length ? `Αλλάζουν <b class="text-slate-900">${list.length}</b> ${list.length === 1 ? 'μέρα' : 'μέρες'} που έχουν ήδη καταχωρηθεί · κόστος <b class="${diff > 0 ? 'text-rose-600' : diff < 0 ? 'text-emerald-700' : 'text-slate-900'}">${diff > 0 ? '+' : ''}${fmt.format(diff)}</b>`
     : 'Δεν αλλάζει καμία μέρα που έχει ήδη καταχωρηθεί· η νέα αμοιβή ισχύει για τις επόμενες καταχωρίσεις.';
 }
+/* Από – Έως γεμίζει την επιλογή· στο μικρό ημερολόγιο προσθέτεις/βγάζεις μεμονωμένες μέρες */
+function psRangeSet() {
+  if (!payScope) return;
+  const from = dmyToIso(($('#psFrom') || {}).value || ''), to = dmyToIso(($('#psTo') || {}).value || '');
+  payScope.sel = new Set(state.attendance.filter(a => a.workerId === payScope.id && from && to && a.date >= from && a.date <= to).map(a => a.date));
+  if (to) payScope.cm = ym(to);
+  payScopeChanged();
+}
+function psToggle(d) { const s = payScope.sel; s.has(d) ? s.delete(d) : s.add(d); payScopeChanged(); }
+function renderPsCal() {
+  const el = $('#psCal'); if (!el) return;
+  const m = payScope.cm, worked = new Set(state.attendance.filter(a => a.workerId === payScope.id && a.date.startsWith(m)).map(a => a.date));
+  const lead = (new Date(m + '-01T00:00:00').getDay() + 6) % 7, n = monthDays(m);
+  let cells = ['Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ', 'Κ'].map(d => `<span class="text-[10px] text-slate-400 text-center">${d}</span>`).join('') + '<span></span>'.repeat(lead);
+  for (let i = 1; i <= n; i++) { const d = `${m}-${String(i).padStart(2, '0')}`, w = worked.has(d), on = payScope.sel.has(d);
+    cells += w ? `<button type="button" class="h-7 rounded text-xs tabular-nums ${on ? 'bg-slate-900 text-white font-semibold' : 'border border-slate-300 text-slate-700 hover:border-slate-900'}" onclick="psToggle('${d}')">${i}</button>`
+      : `<span class="h-7 flex items-center justify-center text-xs text-slate-300 tabular-nums">${i}</span>`; }
+  el.innerHTML = `<div class="rounded-lg border border-slate-200 p-2 max-w-[17rem]">
+    <div class="flex items-center justify-between mb-1"><button type="button" class="px-2 text-slate-500 hover:text-slate-900" aria-label="Προηγούμενος μήνας" onclick="payScope.cm=addMonths(payScope.cm,-1);renderPsCal()">‹</button>
+      <span class="text-xs font-semibold">${monthLabel(m)}</span>
+      <button type="button" class="px-2 text-slate-500 hover:text-slate-900" aria-label="Επόμενος μήνας" onclick="payScope.cm=addMonths(payScope.cm,1);renderPsCal()">›</button></div>
+    <div class="grid grid-cols-7 gap-0.5">${cells}</div></div>
+    <p class="text-[11px] text-slate-400 mt-1">Πάτα μια μέρα για να την προσθέσεις ή να τη βγάλεις. Ενεργές είναι μόνο οι μέρες που δούλεψε.</p>`;
+}
 function applyPayScope() {
-  const list = payScopeDays(); if (!list) return toast('Συμπλήρωσε τις ημερομηνίες (ΗΗ/ΜΜ/ΕΕΕΕ)', 'err');
+  const list = payScopeDays();
   const { id, data } = payScope, byDoc = {};
   list.forEach(a => { (byDoc[attDocPath(a.date)] ??= {})[attKey(a.date, a.workerId)] = attBody({ ...a, payType: data.payType, salary: data.salary, cost: data.payType === 'daily' ? data.cost : 0 }); });
   commit([opWorker(id, data), ...Object.entries(byDoc).map(([p, items]) => M(p, { items }))]);
