@@ -2616,8 +2616,23 @@ function tollsSection(y) {
       : '<div class="p-8 text-center text-sm text-slate-400">Δεν έχουν καταχωρηθεί διόδια.</div>'}
   </section>`;
 }
+function fuelFormHTML(withCar) {
+  return `<form id="fuelForm" class="${withCar ? 'p-5' : 'p-5 border-b border-slate-100 bg-slate-50/60'} space-y-3" onsubmit="addFuel(event)">
+        ${withCar ? `<div><label class="lbl" for="cfCar">Αυτοκίνητο</label><select id="cfCar" class="inp" required onchange="ui.fuelCar=this.value"><option value="">— Επίλεξε αυτοκίνητο —</option>${state.cars.map(c => `<option value="${c.id}" ${c.id === ui.fuelCar ? 'selected' : ''}>${esc(c.plate)}${c.brand ? ' · ' + esc(c.brand) + ' ' + esc(c.model || '') : ''}</option>`).join('')}</select></div>` : ''}
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0"><label class="lbl" for="cfDate">Ημερομηνία</label>${dateField('cfDate', ui.lastFuelDate || today())}</div>
+          <div class="min-w-0"><label class="lbl" for="cfSt">Πρατήριο</label>${supplierField('cfSt', '', 'cfArea', 'fuel')}</div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="min-w-0"><label class="lbl" for="cfArea">Περιοχή</label>${supplierField('cfArea', '', 'cfLit', 'area', false)}</div>
+          <div class="min-w-0"><label class="lbl" for="cfLit">Λίτρα</label><input id="cfLit" type="text" inputmode="decimal" autocomplete="off" step="0.01" min="0" class="inp" placeholder="0" enterkeyhint="next" onkeydown="nextField(event,'cfAmt',false)"></div>
+          <div class="min-w-0"><label class="lbl" for="cfAmt">Τιμή + ΦΠΑ (€)</label><input id="cfAmt" type="text" inputmode="decimal" autocomplete="off" step="0.01" min="0" class="inp" placeholder="0,00" required></div>
+        </div>
+        <button class="btn btn-primary w-full">＋ Καταχώριση καυσίμου</button>
+      </form>`;
+}
 function carsHTML() {
-  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `<button class="btn btn-ghost" onclick="compareModal()">📊 Σύγκριση & συμπεράσματα</button><button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-primary" onclick="carModal()">＋ Προσθήκη αυτοκινήτου</button>`) + `<div id="carsBody"></div>`;
+  return pageHeader('Αυτοκίνητα', 'Καύσιμα, service, ΚΤΕΟ, ασφάλειες ανά όχημα και διόδια e-pass', `<button class="btn btn-ghost" onclick="compareModal()">📊 Σύγκριση & συμπεράσματα</button><button class="btn btn-ghost" onclick="tollModal()">🛣 Προσθήκη διοδίων</button><button class="btn btn-primary" onclick="carModal()">＋ Προσθήκη αυτοκινήτου</button>`) + `${state.cars.length ? `<section class="card fade-in mb-6"><div class="px-5 pt-4 font-bold">⛽ Καύσιμα</div>${fuelFormHTML(true)}</section>` : ''}<div id="carsBody"></div>`;
 }
 /* Θεωρητικό κόστος μεταφοράς (από τα έργα) έναντι πραγματικών εξόδων αυτοκινήτων + διοδίων */
 function transportCompare(y) {
@@ -2751,18 +2766,7 @@ function carHTML() {
   <div class="grid xl:grid-cols-2 gap-6 items-start">
     <section class="card fade-in min-w-0">
       <div class="p-5 border-b border-slate-100 flex items-center justify-between gap-2"><h3 class="font-bold">⛽ Καύσιμα</h3><button class="btn btn-ghost !py-1 !text-xs" onclick="copyCarFuel()">📋 Excel</button></div>
-      <form id="fuelForm" class="p-5 space-y-3 border-b border-slate-100 bg-slate-50/60" onsubmit="addFuel(event)">
-        <div class="grid grid-cols-2 gap-3">
-          <div class="min-w-0"><label class="lbl" for="cfDate">Ημερομηνία</label>${dateField('cfDate', ui.lastFuelDate || today())}</div>
-          <div class="min-w-0"><label class="lbl" for="cfSt">Πρατήριο</label>${supplierField('cfSt', '', 'cfArea', 'fuel')}</div>
-        </div>
-        <div class="grid grid-cols-3 gap-3">
-          <div class="min-w-0"><label class="lbl" for="cfArea">Περιοχή</label>${supplierField('cfArea', '', 'cfLit', 'area', false)}</div>
-          <div class="min-w-0"><label class="lbl" for="cfLit">Λίτρα</label><input id="cfLit" type="text" inputmode="decimal" autocomplete="off" step="0.01" min="0" class="inp" placeholder="0" enterkeyhint="next" onkeydown="nextField(event,'cfAmt',false)"></div>
-          <div class="min-w-0"><label class="lbl" for="cfAmt">Τιμή + ΦΠΑ (€)</label><input id="cfAmt" type="text" inputmode="decimal" autocomplete="off" step="0.01" min="0" class="inp" placeholder="0,00" required></div>
-        </div>
-        <button class="btn btn-primary w-full">＋ Καταχώριση καυσίμου</button>
-      </form>
+      ${fuelFormHTML(false)}
       <div id="fuelList"></div>
     </section>
     <section class="card fade-in min-w-0">
@@ -2824,13 +2828,16 @@ function addFuel(e) {
   const date = dmyToIso($('#cfDate').value); if (!date) return toast('Η ημερομηνία πρέπει να είναι σε μορφή ΗΗ/ΜΜ/ΕΕΕΕ', 'err');
   const amount = num($('#cfAmt').value); if (!(amount > 0)) return toast('Συμπλήρωσε το ποσό', 'err');
   const fix = (v, K) => { const k = KIND[K].parties().find(x => norm(x.name) === norm(v)); return k ? k.name : v.trim(); };
-  const x = { id: uid(), carId: ui.carId, type: 'fuel', date, amount, liters: num($('#cfLit').value), station: fix($('#cfSt').value, 'fuel'), area: fix($('#cfArea').value, 'area') };
+  const carId = $('#cfCar') ? $('#cfCar').value : ui.carId; if (!carId) { flash('#cfCar'); return toast('Διάλεξε αυτοκίνητο', 'err'); }
+  const x = { id: uid(), carId, type: 'fuel', date, amount, liters: num($('#cfLit').value), station: fix($('#cfSt').value, 'fuel'), area: fix($('#cfArea').value, 'area') };
   if (!x.station) return toast('Συμπλήρωσε πρατήριο', 'err');
   const dup = state.carExp.find(o => o.carId === x.carId && o.type === 'fuel' && o.date === x.date && Math.abs(o.amount - x.amount) < 0.005 && norm(o.station) === norm(x.station));
   if (dup) return toast('Υπάρχει ήδη ίδια καταχώριση (ίδια μέρα, πρατήριο και ποσό)', 'err');
   commit([opCarExp(x)]); ui.lastFuelDate = date;
   ['#cfLit', '#cfAmt', '#cfSt', '#cfArea'].forEach(s => $(s).value = ''); supClose();
-  renderCarPage(); toast(`✓ Καύσιμο ${fmt.format(amount)}`);
+  ui.fuelCar = carId; if (ui.view === 'cars') renderCars(); else renderCarPage();
+  const c = state.cars.find(k => k.id === carId); toast(`✓ Καύσιμο ${fmt.format(amount)}${c ? ' · ' + c.plate : ''}`);
+  if (ui.view === 'cars') { const f = $('#cfSt'); if (f) f.focus(); }
 }
 function addCarOther(e) {
   e.preventDefault();
