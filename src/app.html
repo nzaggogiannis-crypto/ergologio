@@ -833,35 +833,40 @@ function supplierStats() {
   return Object.entries(map).map(([key, x]) => ({ key, ...x }));
 }
 function sortSup(k) { ui.supSort = ui.supSort.key === k ? { key: k, dir: -ui.supSort.dir } : { key: k, dir: k === 'name' ? 1 : -1 }; renderSuppliers(); }
+/* Προμηθευτές ανά κατηγορία: Υλικά + κάθε κατηγορία από τα Άλλα / Γενικά έξοδα. Πάτημα κατηγορίας → οι προμηθευτές της· πάτημα προμηθευτή → καρτέλα του. */
+const supCatOf = i => i.etype === 'mat' || !i.etype ? 'Υλικά' : (i.cat || 'Λοιπά');
+function supplierCats() {
+  const cats = {};
+  const get = (c, name) => { const C = cats[c] ??= { name: c, total: 0, sups: {} }; return C.sups[norm(name)] ??= { name, count: 0, total: 0, last: '' }; };
+  state.invoices.forEach(i => { if (!norm(i.supName)) return; const c = supCatOf(i), x = get(c, i.supName);
+    x.count++; x.total += i.amount; if (i.date > x.last) x.last = i.date; cats[c].total += i.amount; });
+  const seen = new Set(state.invoices.map(i => norm(i.supName)));
+  state.suppliers.forEach(sp => { if (!seen.has(norm(sp.name))) get('Υλικά', sp.name); });   // χωρίς τιμολόγια ακόμα
+  return Object.values(cats).map(C => ({ ...C, sups: Object.values(C.sups) }))
+    .sort((a, b) => (b.name === 'Υλικά') - (a.name === 'Υλικά') || b.total - a.total);
+}
 function renderSuppliers() {
   const el = $('#supTable'); if (!el) return;
-  const all = supplierStats(); const q = norm(ui.supSearch);
-  $('#supCount').textContent = `(${all.length})`;
-  if (!all.length) { el.innerHTML = `<div class="p-10 text-center text-sm text-slate-400">Οι προμηθευτές αποθηκεύονται αυτόματα μόλις περάσεις το πρώτο τιμολόγιό τους.</div>`; return; }
-  const { key, dir } = ui.supSort;
-  const rows = all.filter(s => !q || norm(s.name).includes(q)).sort((a, b) =>
-    key === 'name' ? dir * a.name.localeCompare(b.name, 'el') : key === 'last' ? dir * a.last.localeCompare(b.last) : dir * (a[key] - b[key]));
-  const shown = rows;
-  const grand = all.reduce((s, x) => s + x.total, 0) || 1;
-  const st = ui.supSort;
-  const body = shown.map(s => {
-    const ps = Object.entries(s.projects).sort((a, b) => b[1] - a[1]);
-    const dots = ps.slice(0, 6).map(([pid]) => `<span title="${esc(proj(pid).name)}">${dot(proj(pid).color, 2.5)}</span>`).join('') + (ps.length > 6 ? `<span class="text-[11px] text-slate-400">+${ps.length - 6}</span>` : '');
-    return `<tr class="cursor-pointer group" onclick="openSupplier('${encodeURIComponent(s.name)}')">
-      <td class="min-w-[180px]"><div class="text-left font-semibold group-hover:text-amber-700">${esc(s.name)}</div>
-        <div class="h-1.5 mt-1.5 rounded-full bg-slate-100 overflow-hidden max-w-[220px]"><div class="h-full bg-slate-900" style="width:${Math.max(2, s.total / grand * 100)}%"></div></div></td>
-      <td class="num">${s.count}</td>
-      <td class="num font-bold whitespace-nowrap">${fmt.format(s.total)}</td>
-      <td class="num whitespace-nowrap hidden sm:table-cell">${s.last ? dmy(s.last) : '—'}</td>
-      <td class="hidden md:table-cell"><div class="flex items-center gap-1 flex-wrap">${dots || '<span class="text-slate-300">—</span>'}${ps.length ? `<span class="text-xs text-slate-400 ml-1">${ps.length} έργ${ps.length === 1 ? 'ο' : 'α'}</span>` : ''}</div></td>
-      <td class="text-right whitespace-nowrap" onclick="event.stopPropagation()">
-        <button class="p-1.5 text-slate-400 hover:text-slate-900" title="Μετονομασία" aria-label="Μετονομασία προμηθευτή" onclick="renameSupplierModal('${encodeURIComponent(s.name)}')">✎</button>
-        ${s.count ? '' : `<button class="p-1.5 text-slate-400 hover:text-rose-600" title="Αφαίρεση από τη λίστα" aria-label="Αφαίρεση προμηθευτή" onclick="removeSupplier('${encodeURIComponent(s.name)}')">✕</button>`}</td></tr>`;
-  }).join('');
-  el.innerHTML = `<table class="tbl w-full"><thead><tr>${sortTh('Προμηθευτής', 'name', st, 'sortSup')}${sortTh('Τιμ.', 'count', st, 'sortSup', 'num')}${sortTh('Σύνολο', 'total', st, 'sortSup', 'num')}
-      ${sortTh('Τελευταίο', 'last', st, 'sortSup', 'num hidden sm:table-cell')}<th class="hidden md:table-cell">Έργα</th><th></th></tr></thead>
-    <tbody>${body || `<tr><td colspan="6" class="text-center text-slate-400 !py-8">Κανένας προμηθευτής δεν ταιριάζει στην αναζήτηση.</td></tr>`}</tbody></table>
-`;
+  const cats = supplierCats(), q = norm(ui.supSearch);
+  $('#supCount').textContent = `(${supplierStats().length})`;
+  if (!cats.length) { el.innerHTML = `<div class="p-10 text-center text-sm text-slate-400">Οι προμηθευτές αποθηκεύονται αυτόματα μόλις περάσεις το πρώτο τιμολόγιό τους.</div>`; return; }
+  ui.supCatOpen ??= {};
+  const html = cats.map(C => {
+    const sups = C.sups.filter(x => !q || norm(x.name).includes(q)).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'el'));
+    if (q && !sups.length) return '';
+    const open = q ? true : !!ui.supCatOpen[C.name];
+    return `<div class="border-b border-slate-100">
+      <button class="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-slate-50" aria-expanded="${open}" onclick="ui.supCatOpen[this.dataset.c]=!ui.supCatOpen[this.dataset.c];renderSuppliers()" data-c="${esc(C.name)}">
+        <span class="text-slate-400 w-3 transition-transform ${open ? 'rotate-90' : ''}">▸</span>
+        <span class="font-semibold">${esc(C.name)}</span><span class="text-xs text-slate-400">${C.sups.length}</span>
+        <span class="ml-auto num font-bold whitespace-nowrap">${fmt.format(C.total)}</span></button>
+      ${open ? `<div class="pb-2">${sups.map(x => `<div class="flex items-center gap-3 pl-11 pr-5 py-2 hover:bg-slate-50 cursor-pointer group" onclick="openSupplier('${encodeURIComponent(x.name)}')">
+          <span class="min-w-0 flex-1 truncate group-hover:text-amber-700">${esc(x.name)}</span>
+          <span class="text-xs text-slate-400 whitespace-nowrap hidden sm:inline">${x.count ? x.count + ' τιμ. · ' + dmy(x.last) : 'χωρίς τιμολόγια'}</span>
+          <span class="num whitespace-nowrap w-32">${fmt.format(x.total)}</span>
+          ${x.count ? '<span class="w-5"></span>' : `<button class="w-5 text-slate-300 hover:text-rose-600" title="Αφαίρεση από τη λίστα" aria-label="Αφαίρεση προμηθευτή" onclick="event.stopPropagation();removeSupplier('${encodeURIComponent(x.name)}')">✕</button>`}</div>`).join('')}</div>` : ''}
+    </div>`; }).join('');
+  el.innerHTML = html || '<div class="p-8 text-center text-sm text-slate-400">Κανένας προμηθευτής δεν ταιριάζει στην αναζήτηση.</div>';
 }
 function openSupplierInvoices(enc) { ui.invKind = 'exp'; ui.invSupplier = decodeURIComponent(enc); ui.invProject = 'all'; ui.invMonth = 'all'; ui.invSearch = ''; ui.invShow = 15; go('invoices'); }
 function copySuppliers() {
@@ -1977,7 +1982,7 @@ function copyInvoices() {
 
 /* ============ ΠΡΟΜΗΘΕΥΤΕΣ (καρτέλα) ============ */
 function suppliersHTML() {
-  return pageHeader('Προμηθευτές', 'Όλοι οι προμηθευτές με τα σύνολά τους· πάτα έναν για να δεις όλα του τα τιμολόγια',
+  return pageHeader('Προμηθευτές', 'Ανά κατηγορία· πάτα μια κατηγορία για τους προμηθευτές της',
       `<button class="btn btn-ghost" onclick="copySuppliers()">📋 Αντιγραφή σε Excel</button>`) + `
     <section class="card fade-in">
       <div class="p-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
