@@ -800,7 +800,7 @@ function totals() {
 
 /* ============ ΕΡΓΑ / ΕΠΙΣΚΟΠΗΣΗ ============ */
 function dashboardHTML() {
-  return pageHeader('Έργα', 'Έσοδα, κόστος και αποτέλεσμα ανά έργο· πάτα ▸ για ανάλυση',
+  return pageHeader('Έργα', 'Έσοδα, κόστος και αποτέλεσμα ανά έργο· πάτα ένα έργο για την καρτέλα του',
       `<button class="btn btn-ghost" onclick="copyDashboard()">📋 Excel</button>
        <button class="btn btn-primary" onclick="projectModal()">＋ Νέο έργο</button>`) + `
     <div id="kpis" class="mb-6 empty:hidden"></div>
@@ -919,11 +919,9 @@ function renderKpis() {
 }
 function sortDash(k) { ui.dashSort = ui.dashSort.key === k ? { key: k, dir: -ui.dashSort.dir } : { key: k, dir: k === 'name' ? 1 : -1 }; renderDashTable(); }
 /* Λίστα έργων: μία γραμμή ανά έργο (όνομα · έσοδα · κόστος · αποτέλεσμα).
-   ▸ ανοίγει την ανάλυση του έργου· μέσα της κάθε κατηγορία ανοίγει τις εγγραφές της. Όλα κλειστά αρχικά. */
+   Από κάτω μόνο τα ποσά ανά κατηγορία κόστους. Πάτημα → καρτέλα έργου. */
 const DASH_COLS = 'grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_8.5rem] items-center gap-x-3';
 const resCls = v => v < 0 ? 'text-rose-600' : v > 0 ? 'text-emerald-700' : 'text-slate-500';
-function toggleDash(pid) { ui.dashOpen[pid] = !ui.dashOpen[pid]; renderDashTable(); }
-function toggleDashSub(k) { ui.dashSub[k] = !ui.dashSub[k]; renderDashTable(); }
 function dashSortHead(label, key, cls = '') {
   const on = ui.dashSort.key === key;
   return `<button class="${cls} inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide ${on ? 'text-slate-900' : 'text-slate-500'} hover:text-slate-900" onclick="sortDash('${key}')">${label}<span class="${on ? '' : 'invisible'}">${ui.dashSort.dir < 0 ? '▼' : '▲'}</span></button>`;
@@ -936,75 +934,31 @@ function renderDashTable() {
   const { key, dir } = ui.dashSort;
   rows.sort((a, b) => (!!a.p.hidden - !!b.p.hidden) || (key === 'name' ? dir * a.p.name.localeCompare(b.p.name, 'el') : dir * (a[key] - b[key])));
   const money = v => fmt.format(v);
-  const row = r => { const open = !!ui.dashOpen[r.p.id], has = r.revenue || r.total;
+  const row = r => { const has = r.revenue || r.total;
+    const cats = [['Υλικά', r.materials], ['Εργατικά', r.labor], ['Τρίτοι', r.thirds], ['Μεταφορά', r.transport]].filter(([, v]) => v).map(([l, v]) => `${l} ${money0.format(v)}`).join(' · ');
     return `<div class="border-b border-slate-100 ${r.p.hidden ? 'opacity-50' : ''}">
-      <button class="${DASH_COLS} w-full text-left px-4 py-3 hover:bg-slate-50" aria-expanded="${open}" onclick="toggleDash('${r.p.id}')">
-        <span class="flex items-center gap-2.5 min-w-0">
-          <span class="arr text-slate-400 w-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}">▸</span>${dot(r.p.color, 2)}
-          <span class="font-semibold truncate">${esc(r.p.name)}</span>${r.p.hidden ? '<span class="text-[10px] text-slate-500 uppercase shrink-0">κρυφό</span>' : ''}</span>
+      <button class="${DASH_COLS} w-full text-left px-4 py-3 hover:bg-slate-50 group" onclick="openProject('${r.p.id}')" title="Καρτέλα έργου">
+        <span class="min-w-0"><span class="flex items-center gap-2.5 min-w-0">${dot(r.p.color, 2)}
+          <span class="font-semibold truncate group-hover:text-amber-700">${esc(r.p.name)}</span>${r.p.hidden ? '<span class="text-[10px] text-slate-500 uppercase shrink-0">κρυφό</span>' : ''}</span>
+          ${cats ? `<span class="block text-xs text-slate-500 mt-0.5 pl-[18px] truncate">${cats}</span>` : ''}</span>
         <span class="num whitespace-nowrap hidden sm:block">${r.revenue ? money(r.revenue) : '<span class="text-slate-300">—</span>'}</span>
         <span class="num whitespace-nowrap hidden sm:block">${r.total ? money(r.total) : '<span class="text-slate-300">—</span>'}</span>
         <span class="num whitespace-nowrap font-bold ${resCls(r.result)}">${has ? money(r.result) : '<span class="text-slate-300 font-normal">—</span>'}</span>
       </button>
-      ${open ? dashDetail(r) : ''}</div>`; };
+      </div>`; };
   const vis = rows.filter(r => !r.p.hidden), hid = rows.length - vis.length;
   const sum = k => vis.reduce((s, r) => s + r[k], 0);
   el.innerHTML = `<div class="${DASH_COLS} px-4 py-2 bg-slate-50 border-b border-slate-100">
-      <span class="pl-[calc(0.75rem+0.625rem+8px+0.625rem)]">${dashSortHead('Έργο', 'name')}</span>
+      <span class="pl-[18px]">${dashSortHead('Έργο', 'name')}</span>
       <span class="text-right hidden sm:block">${dashSortHead('Έσοδα', 'revenue')}</span>
       <span class="text-right hidden sm:block">${dashSortHead('Κόστος', 'total')}</span>
       <span class="text-right">${dashSortHead('Αποτέλεσμα', 'result')}</span></div>
     ${rows.map(row).join('') || '<div class="p-8 text-center text-sm text-slate-400">Κανένα έργο δεν ταιριάζει στην αναζήτηση.</div>'}
     <div class="${DASH_COLS} px-4 py-3 bg-slate-50 rounded-b-2xl">
-      <span class="font-bold pl-[calc(0.75rem+0.625rem+8px+0.625rem)]">Σύνολο (${vis.length})${hid ? `<span class="block text-[11px] font-normal text-slate-400">χωρίς ${hid} σε απόκρυψη</span>` : ''}</span>
+      <span class="font-bold pl-[18px]">Σύνολο (${vis.length})${hid ? `<span class="block text-[11px] font-normal text-slate-400">χωρίς ${hid} σε απόκρυψη</span>` : ''}</span>
       <span class="num font-bold whitespace-nowrap hidden sm:block">${money(sum('revenue'))}</span>
       <span class="num font-bold whitespace-nowrap hidden sm:block">${money(sum('total'))}</span>
       <span class="num font-extrabold whitespace-nowrap ${resCls(sum('result'))}">${money(sum('result'))}</span></div>`;
-}
-/* Ανάλυση ενός έργου (1ο επίπεδο) με κατηγορίες που ανοίγουν (2ο επίπεδο) */
-function dashDetail(r) {
-  const p = r.p, pid = p.id;
-  const sals = bydate('dsal', state.sales.filter(i => i.project === pid)), invs = bydate('dinv', state.invoices.filter(i => i.project === pid));
-  const thrs = bydate('dthr', state.thirds.filter(i => i.project === pid)), recs = state.attendance.filter(a => a.projectId === pid);
-  const tc = transportCost(p, recs);
-  const LIM = 15, more = (n, kind) => n > LIM ? `<button class="text-xs font-semibold text-slate-500 hover:text-slate-900 px-3 py-2" onclick="${kind === 'labor' ? `openProject('${pid}')` : `openProjectInvoices('${pid}','${kind}')`}">Όλες (${n}) →</button>` : '';
-  const empty = '<div class="px-3 py-3 text-sm text-slate-400">Καμία εγγραφή.</div>';
-  const line = (a, b, c) => `<div class="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] gap-3 px-3 py-1.5 text-sm"><span class="text-slate-500 tabular-nums">${a}</span><span class="truncate">${b}</span><span class="num whitespace-nowrap">${c}</span></div>`;
-  const docLines = (l, kind) => l.length ? l.slice(0, LIM).map(i => line(dmy(i.date), esc(i.supName) + (i.invNo ? ` <span class="text-slate-400">· ${esc(i.invNo)}</span>` : ''), fmt.format(i.amount))).join('') + more(l.length, kind) : empty;
-  const byW = {}; recs.forEach(a => { const x = byW[a.workerId] ??= { name: a.workerName, days: 0, cost: 0 }; x.days++; x.cost += a.cost + a.extra; });
-  const wl = Object.values(byW).sort((a, b) => b.cost - a.cost);
-  const laborLines = wl.length ? wl.slice(0, LIM).map(x => line(`${x.days} ${x.days === 1 ? 'μέρα' : 'μέρες'}`, esc(x.name), fmt.format(x.cost))).join('') + more(wl.length, 'labor') : empty;
-  const trLines = (tc.carCost || tc.ferry.length || tc.air.length) ? [
-      tc.carCost ? line('Αμάξι', `${tc.cars} μεταφορές × ${fmt.format(tc.carPrice)}`, fmt.format(tc.carCost)) : '',
-      ...[...tc.ferry, ...tc.air].map(x => line(x.date ? dmy(x.date) : '—', `${x.type === 'air' ? 'Αεροπορικά' : 'Ακτοπλοϊκά'}${x.note ? ' · ' + esc(x.note) : ''} · ${x.count} εισ.`, fmt.format(x.total)))].join('') : empty;
-  const cat = (k, label, amount, sub, body) => { const key = pid + ':' + k, open = !!ui.dashSub[key];
-    return `<div class="rounded-lg ${open ? 'bg-white border border-slate-200' : ''}">
-      <button class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-white rounded-lg" aria-expanded="${open}" onclick="toggleDashSub('${key}')">
-        <span class="text-slate-400 w-3 transition-transform ${open ? 'rotate-90' : ''}">▸</span><span class="font-medium">${label}</span>
-        <span class="text-xs text-slate-400">${sub}</span><span class="ml-auto num whitespace-nowrap">${fmt.format(amount)}</span></button>
-      ${open ? `<div class="border-t border-slate-100 py-1 max-h-80 overflow-y-auto">${body}</div>` : ''}</div>`; };
-  const c = p.contract;
-  const facts = [p.client ? `Πελάτης: <b class="font-medium text-slate-700">${esc(p.client)}</b>` : '',
-    c ? `Σύμβαση ${fmt.format(c.amount)} · εισπράχθηκε ${Math.round(r.revenue / c.amount * 100)}%` : '',
-    r.days ? `${new Set(recs.map(a => a.date)).size} μέρες εργασίας` : ''].filter(Boolean).join(' · ');
-  return `<div class="px-4 pb-4 sm:pl-10">
-    <div class="rounded-xl bg-slate-50 p-2 space-y-0.5">
-      <div class="sm:hidden grid grid-cols-2 gap-2 px-3 py-2 text-sm"><span class="text-slate-500">Έσοδα <b class="block text-slate-900 tabular-nums">${fmt.format(r.revenue)}</b></span><span class="text-slate-500">Κόστος <b class="block text-slate-900 tabular-nums">${fmt.format(r.total)}</b></span></div>
-      <div class="px-3 pt-1 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Έσοδα</div>
-      ${cat('sal', 'Τιμολόγια πωλήσεων', r.revenue, `${sals.length}`, docLines(sals, 'sal'))}
-      <div class="px-3 pt-3 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Κόστος</div>
-      ${cat('inv', 'Υλικά', r.materials, `${invs.length} τιμολόγια`, docLines(invs, 'exp'))}
-      ${cat('labor', 'Εργατικά', r.labor, `${r.days} μεροκάματα${r.extra ? ' · έξτρα ' + fmt.format(r.extra) : ''}`, laborLines)}
-      ${cat('thr', 'Τρίτοι', r.thirds, `${thrs.length} τιμολόγια`, docLines(thrs, 'thr'))}
-      ${cat('tr', 'Μεταφορά', r.transport, '', trLines)}
-    </div>
-    ${facts ? `<p class="text-xs text-slate-500 mt-2 px-1">${facts}</p>` : ''}
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 px-1 text-sm">
-      <button class="font-semibold text-slate-900 hover:underline" onclick="openProject('${pid}')">Καρτέλα έργου →</button>
-      <button class="text-slate-500 hover:text-slate-900" onclick="projectModal('${pid}')">Επεξεργασία</button>
-      <button class="text-slate-500 hover:text-slate-900" onclick="toggleProjectHidden('${pid}')">${p.hidden ? 'Εμφάνιση στα σύνολα' : 'Απόκρυψη από σύνολα'}</button>
-      <button class="text-slate-500 hover:text-rose-600 sm:ml-auto" onclick="deleteProjectModal('${pid}')">Διαγραφή</button>
-    </div></div>`;
 }
 function openProjectInvoices(id, kind = 'exp') { ui.invKind = kind; ui.invProject = id; ui.invShow = 15; ui.invMonth = 'all'; ui.invSupplier = ''; go('invoices'); }
 function copyDashboard() {
