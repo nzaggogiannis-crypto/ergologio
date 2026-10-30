@@ -8,6 +8,12 @@ Back-office web app της ΔΥΡΑΣ ΤΕΧΝΙΚΗ ΟΕ. Ζωντανή σελ
 2. `npm install` (μία φορά) και `python3 tools/build.py` → ξαναφτιάχνει το `index.html` (Tailwind μεταγλωττισμένο μέσα).
 3. Έλεγχος σύνταξης: πάρε το μεγάλο `<script>` του `index.html` και τρέξε `node --check`.
 4. Commit + push στο `main`. Η σελίδα ενημερώνεται σε 1–2 λεπτά· ο χρήστης κάνει Ctrl+F5.
+5. **Πάντα και στο artifact του Claude** (ο χρήστης θέλει τις δύο εκδόσεις να είναι πάντα ίδιες): δημοσίευσε το ίδιο `src/app.html` (όχι το `index.html`) στο artifact «ΕργοΛόγιο» https://claude.ai/code/artifact/f9d84153-31a3-4964-9a82-5a1f9954a8c0 — Artifact tool, `url` αυτό, χωρίς αλλαγή στα `capabilities`. Μια αλλαγή θεωρείται ολοκληρωμένη μόνο όταν έχει γίνει και στα δύο.
+
+## Συγχρονισμός GitHub ↔ artifact
+- Πηγή αλήθειας για τον κώδικα είναι το `src/app.html` στο `main`. Αλλαγές δεν γίνονται απευθείας στο artifact· αν βρεθεί αλλαγή μόνο στο artifact, πρώτα περνάει στο `src/app.html`, μετά push, μετά δημοσίευση.
+- Τα **δεδομένα** δεν μοιράζονται: η σελίδα του GitHub γράφει στο Firebase, το artifact στη βάση του Claude.
+- Στο artifact δεν δουλεύουν όσα εξαρτώνται από το build (κλειδί Dropbox, σύνδεση/αποσύνδεση Firebase)· είναι αναμενόμενο.
 
 ## Αρχιτεκτονική
 - `src/app.html`: όλη η εφαρμογή (vanilla JS). Μιλάει με τη βάση μέσω `window.claude.use('db'|'user')`.
