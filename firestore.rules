@@ -22,7 +22,7 @@ service cloud.firestore {
 
     // Ανά ενότητα (για μηχανικούς / εργαζόμενους με επιπλέον πρόσβαση)
     function metaOk(d, a) {
-      return (d in ['projects', 'suppliers', 'customers', 'supalias'] && (can(a, 'dash') || can(a, 'invoices') || can(a, 'suppliers') || can(a, 'customers') || can(a, 'calendar') || can(a, 'labor') || can(a, 'notif')))
+      return (d in ['projects', 'suppliers', 'customers', 'supalias', 'expcats'] && (can(a, 'dash') || can(a, 'invoices') || can(a, 'suppliers') || can(a, 'customers') || can(a, 'calendar') || can(a, 'labor') || can(a, 'notif')))
         || (d == 'workers' && (can(a, 'dash') || can(a, 'calendar') || can(a, 'labor')))
         || (d == 'cars' && (can(a, 'cars') || can(a, 'notif')))
         || (d == 'files' && can(a, 'files'))

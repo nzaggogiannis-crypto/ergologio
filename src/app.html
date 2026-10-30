@@ -273,8 +273,8 @@ const ROLE_DEF = { employee: ['me', 'myinv'], engineer: ['me', 'myinv', 'cars'],
 const modsFor = (r, extra = {}) => { const o = Object.fromEntries(MODS.map(([k]) => [k, ROLE_DEF[r].includes(k)])); Object.entries(extra || {}).forEach(([k, v]) => { if (k in o) o[k] = !!v; }); return o; };
 const VIEW_MOD = { dashboard: 'dash', project: 'dash', invoices: 'invoices', calendar: 'calendar', suppliers: 'suppliers', supplier: 'suppliers', customers: 'customers', customer: 'customers',
   labor: 'labor', worker: 'labor', cars: 'cars', car: 'cars', files: 'files', notif: 'notif', me: 'me', myinv: 'myinv' };
-const MOD_PATHS = { dash: ['meta/projects', 'meta/suppliers', 'meta/customers', 'meta/supalias', 'meta/workers', 'inv', 'sal', 'thr', 'att'],
-  invoices: ['meta/projects', 'meta/suppliers', 'meta/customers', 'meta/supalias', 'inv', 'sal', 'thr'], calendar: ['meta/projects', 'meta/workers', 'att'],
+const MOD_PATHS = { dash: ['meta/projects', 'meta/suppliers', 'meta/customers', 'meta/supalias', 'meta/expcats', 'meta/workers', 'inv', 'sal', 'thr', 'att'],
+  invoices: ['meta/projects', 'meta/suppliers', 'meta/customers', 'meta/supalias', 'meta/expcats', 'inv', 'sal', 'thr'], calendar: ['meta/projects', 'meta/workers', 'att'],
   suppliers: ['meta/projects', 'meta/suppliers', 'inv'], customers: ['meta/projects', 'meta/customers', 'sal'], labor: ['meta/projects', 'meta/workers', 'att'],
   cars: ['meta/cars', 'car', 'shared/transport'], files: ['meta/files'], notif: ['meta/reminders', 'meta/notif', 'meta/cars', 'car', 'meta/projects'] };
 const staffCan = v => v === 'me' || v === 'myinv' ? myMods.has(v) : !!VIEW_MOD[v] && myMods.has(VIEW_MOD[v]);
@@ -292,7 +292,15 @@ const opWorker = (id, v) => M('meta/workers', { items: { [id]: v } });
 const opSupplier = (id, v) => M('meta/suppliers', { items: { [id]: v } });
 const workerBody = w => ({ first: w.first || '', last: w.last || '', name: w.name, role: w.role || 'Εργατικό δυναμικό',
   payType: w.payType === 'salary' ? 'salary' : 'daily', cost: +w.cost || 0, salary: +w.salary || 0, created: w.created || Date.now() });
-const invBody = i => ({ date: i.date, invNo: i.invNo || '', supName: i.supName || '', amount: +i.amount });
+const invBody = i => ({ date: i.date, invNo: i.invNo || '', supName: i.supName || '', amount: +i.amount,
+  etype: ['oth', 'gen'].includes(i.etype) ? i.etype : 'mat', cat: i.etype === 'oth' || i.etype === 'gen' ? i.cat || '' : '', pay: i.etype === 'gen' ? (i.pay === 'card' ? 'card' : 'cash') : '' });
+/* Είδη αγορών: Υλικά · Άλλα (με κατηγορία) · Γενικά έξοδα (χωρίς τιμολόγιο, μετρητά ή κάρτα). Έργο «Γραφείο» = έξοδο εταιρείας, όχι έργου. */
+const OFFICE = 'office';
+const ETYPES = [['mat', 'Υλικά'], ['oth', 'Άλλα'], ['gen', 'Γενικά έξοδα']];
+const etypeLabel = k => (ETYPES.find(x => x[0] === k) || ETYPES[0])[1];
+const EXP_CATS_DEF = ['Φαγητό', 'Καφέδες', 'Ξενοδοχείο', 'Ακτοπλοϊκά', 'Αεροπορικά', 'Δώρα', 'Εξοπλισμός / πάγια', 'Αναλώσιμα γραφείου'];
+const expCats = () => { const extra = Object.values(((docs['meta/expcats'] || {}).items) || {}).filter(v => v && v.name).map(v => String(v.name));
+  return [...new Set([...EXP_CATS_DEF, ...extra])]; };
 const opInvoice = (i, del) => M(invDocPath(i.project, i.date), { project: i.project, items: { [i.id]: del ? null : invBody(i) } });
 /* Τιμολόγια πωλήσεων (έσοδα): sal/<έργο>_<YYYY-MM>. Στη μνήμη έχουν το ίδιο σχήμα με τα έξοδα (supName = πελάτης, kind = 'sal'). */
 const salDocPath = (pid, date) => `sal/${pid}_${ym(date)}`;
@@ -358,7 +366,7 @@ function rebuild0() {
   for (const [path, d] of Object.entries(docs)) {
     if (!d) continue;
     if (path.startsWith('inv/')) {
-      for (const [id, v] of Object.entries(d.items || {})) if (v) invoices.push({ id, kind: 'exp', project: d.project, date: v.date, invNo: v.invNo || '', supName: v.supName || '', amount: +v.amount || 0 });
+      for (const [id, v] of Object.entries(d.items || {})) if (v) invoices.push({ id, kind: 'exp', project: d.project, date: v.date, invNo: v.invNo || '', supName: v.supName || '', amount: +v.amount || 0, etype: ['oth', 'gen'].includes(v.etype) ? v.etype : 'mat', cat: v.cat || '', pay: v.pay || '' });
     } else if (path.startsWith('car/')) {
       for (const [id, v] of Object.entries(d.items || {})) if (v) carExp.push({ id, carId: d.car, ...v, amount: +v.amount || 0, liters: +v.liters || 0 });
     } else if (path.startsWith('sal/')) {
@@ -600,14 +608,14 @@ async function replaceAll(st, label, doneMsg) {
 }
 
 /* ============ UI STATE ============ */
-const ui = { dsort: {}, projSel: {}, view: 'dashboard', dashSearch: '', dashSort: { key: 'total', dir: -1 }, dashOpen: {}, dashSub: {},
+const ui = { dsort: {}, projSel: {}, view: 'dashboard', dashSearch: '', dashSort: { key: 'total', dir: -1 }, dashOpen: {}, dashSub: {}, expType: 'mat', expCat: 'Φαγητό', expPay: 'cash',
   invKind: 'exp', invShow: 15, invProject: 'all', invMonth: 'all', invSearch: '', invSupplier: '', invSort: { key: 'date', dir: -1 }, lastProj: '', lastDate: '',
   supName: '', supShow: 15, calMonth: ym(today()), custName: '', custShow: 15, custSearch: '', custSort: { key: 'revenue', dir: -1 },
   supSearch: '', supSort: { key: 'total', dir: -1 }, supAll: false,
   attDate: today(), laborPeriod: 'all', laborProject: 'all', workerId: '', workerMonth: ym(today()),
   wCat: 'all', carId: '', carFuelShow: 15, carOtherShow: 15, carOtherType: 'service', lastFuelDate: '', projectId: '', projMonth: ym(today()), projInvShow: 50, projOpen: { sal: false, inv: false, labor: false, sup: false, months: false } };
 
-const proj = id => state.projects.find(p => p.id === id) || { name: '(διαγραμμένο έργο)', color: '#94a3b8', addr: '' };
+const proj = id => id === OFFICE ? { id: OFFICE, name: 'Γραφείο', color: '#64748b', addr: '' } : state.projects.find(p => p.id === id) || { name: '(διαγραμμένο έργο)', color: '#94a3b8', addr: '' };
 const projSorted = () => [...state.projects].sort((a, b) => a.name.localeCompare(b.name, 'el'));
 const nextColor = () => PALETTE.find(c => !state.projects.some(p => p.color === c)) || pick(PALETTE);
 
@@ -788,13 +796,13 @@ function pageHeader(title, sub, right = '') {
 /* ============ ΣΥΓΚΕΝΤΡΩΤΙΚΑ ============ */
 function totals() {
   const r = {};
-  state.projects.forEach(p => r[p.id] = { thirds: 0, thrCount: 0, materials: 0, labor: 0, base: 0, extra: 0, invCount: 0, days: 0, revenue: 0, salCount: 0 });
-  state.invoices.forEach(i => { const x = r[i.project]; if (x) { x.materials += i.amount; x.invCount++; } });
+  state.projects.forEach(p => r[p.id] = { other: 0, thirds: 0, thrCount: 0, materials: 0, labor: 0, base: 0, extra: 0, invCount: 0, days: 0, revenue: 0, salCount: 0 });
+  state.invoices.forEach(i => { const x = r[i.project]; if (x) { if (i.etype === 'mat') x.materials += i.amount; else x.other += i.amount; x.invCount++; } });
   state.sales.forEach(i => { const x = r[i.project]; if (x) { x.revenue += i.amount; x.salCount++; } });
   state.thirds.forEach(i => { const x = r[i.project]; if (x) { x.thirds += i.amount; x.thrCount++; } });
   state.attendance.forEach(a => { const x = r[a.projectId]; if (x) { x.base += a.cost; x.extra += a.extra; x.labor += a.cost + a.extra; x.days++; } });
   state.projects.forEach(p => { r[p.id].transport = transportCost(p, state.attendance.filter(a => a.projectId === p.id)).total; });
-  Object.values(r).forEach(x => { x.total = x.materials + x.labor + x.thirds + x.transport; x.result = x.revenue - x.total; });
+  Object.values(r).forEach(x => { x.total = x.materials + x.other + x.labor + x.thirds + x.transport; x.result = x.revenue - x.total; });
   return r;
 }
 
@@ -935,7 +943,7 @@ function renderDashTable() {
   rows.sort((a, b) => (!!a.p.hidden - !!b.p.hidden) || (key === 'name' ? dir * a.p.name.localeCompare(b.p.name, 'el') : dir * (a[key] - b[key])));
   const money = v => fmt.format(v);
   const row = r => { const has = r.revenue || r.total;
-    const cats = [['Υλικά', r.materials], ['Εργατικά', r.labor], ['Τρίτοι', r.thirds], ['Μεταφορά', r.transport]].filter(([, v]) => v).map(([l, v]) => `${l} ${money0.format(v)}`).join(' · ');
+    const cats = [['Υλικά', r.materials], ['Λοιπά', r.other], ['Εργατικά', r.labor], ['Τρίτοι', r.thirds], ['Μεταφορά', r.transport]].filter(([, v]) => v).map(([l, v]) => `${l} ${money0.format(v)}`).join(' · ');
     return `<div class="border-b border-slate-100 ${r.p.hidden ? 'opacity-50' : ''}">
       <button class="${DASH_COLS} w-full text-left px-4 py-3 hover:bg-slate-50 group" onclick="openProject('${r.p.id}')" title="Καρτέλα έργου">
         <span class="min-w-0"><span class="flex items-center gap-2.5 min-w-0">${dot(r.p.color, 2)}
@@ -1135,7 +1143,8 @@ function saveDoc(c, old) {
 function invoicesHTML() {
   const k = ui.invKind, K = KIND[k];
   const def = ui.invProject !== 'all' ? ui.invProject : ui.lastProj;
-  const opts = `<option value="">— Επίλεξε έργο —</option>` + projSorted().map(p => `<option value="${p.id}" ${p.id === def ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const opts = `<option value="">— Επίλεξε έργο —</option>` + (k === 'exp' ? `<option value="${OFFICE}" ${def === OFFICE ? 'selected' : ''}>Γραφείο</option>` : '') + projSorted().map(p => `<option value="${p.id}" ${p.id === def ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const et = k === 'exp' ? ui.expType : 'mat';
   const tab = (key, label, sub) => `<button class="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-semibold transition ${k === key ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-900'}"
       onclick="ui.invKind='${key}';ui.invShow=15;ui.invSupplier='';render()">${label} <span class="font-normal text-xs ${k === key ? 'text-slate-500' : 'text-slate-400'}">· ${sub} (${KIND[key].list().length})</span></button>`;
   return pageHeader('Τιμολόγια', 'Αγορές από προμηθευτές (έξοδα), πωλήσεις σε πελάτες (έσοδα) και τιμολόγια προς τρίτους (έξοδα) ανά έργο',
@@ -1144,7 +1153,8 @@ function invoicesHTML() {
   <div class="inline-flex w-full sm:w-auto gap-1 p-1 rounded-xl bg-slate-200/70 mb-5">${tab('exp', 'Αγορές', 'έξοδα')}${tab('sal', 'Πωλήσεις', 'έσοδα')}${tab('thr', 'Προς τρίτους', 'έξοδα')}</div>
   <div class="grid xl:grid-cols-[380px_1fr] gap-6 items-start">
     <section class="card p-5 fade-in xl:sticky xl:top-6">
-      ${k === 'exp' ? `<div id="dropzone" class="relative overflow-hidden rounded-xl border-2 border-dashed border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-center cursor-pointer hover:border-amber-500 transition"
+      ${k === 'exp' ? expTypeHTML() : ''}
+      ${k === 'exp' && et === 'mat' ? `<div id="dropzone" class="relative overflow-hidden rounded-xl border-2 border-dashed border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 p-5 text-center cursor-pointer hover:border-amber-500 transition"
            onclick="$('#pdfInput').click()" ondragover="event.preventDefault();this.classList.add('border-amber-500','bg-amber-100')"
            ondragleave="this.classList.remove('border-amber-500','bg-amber-100')" ondrop="onDrop(event)">
         <input id="pdfInput" type="file" accept=".pdf,image/*" multiple class="hidden" onchange="startAiBatch(this.files);this.value=''">
@@ -1163,11 +1173,13 @@ function invoicesHTML() {
       </div>
       <div id="aiResult" class="hidden mt-3 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800"></div>`
       : k === 'thr' ? `<div class="rounded-xl bg-orange-50 border border-orange-200 px-4 py-3 text-sm text-orange-900"><b>Τιμολόγιο προς τρίτους</b> · πληρωμή σε πρόσωπο (π.χ. συνεργάτη ή υπεργολάβο) για ένα έργο. Μετράει στο κόστος του έργου ως «Τρίτοι».</div>`
-      : `<div class="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900"><b>Τιμολόγιο πώλησης</b> · ό,τι τιμολογείς στον πελάτη για ένα έργο. Μετράει στα έσοδα και στο αποτέλεσμα του έργου.</div>`}
+      : k === 'sal' ? `<div class="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900"><b>Τιμολόγιο πώλησης</b> · ό,τι τιμολογείς στον πελάτη για ένα έργο. Μετράει στα έσοδα και στο αποτέλεσμα του έργου.</div>` : ''}
       <form id="invForm" class="mt-5 space-y-3.5" onsubmit="addInvoice(event)">
+        ${et === 'oth' || et === 'gen' ? expCatHTML() : ''}
+        ${et === 'gen' ? `<div><span class="lbl">Πληρωμή</span><div class="inline-flex gap-1 p-1 rounded-lg bg-slate-100">${[['cash', 'Μετρητά'], ['card', 'Κάρτα εταιρείας']].map(([v, l]) => `<button type="button" class="px-3 py-1.5 rounded-md text-sm font-medium ${ui.expPay === v ? 'bg-white shadow text-slate-900' : 'text-slate-500'}" onclick="ui.expPay='${v}';render()">${l}</button>`).join('')}</div></div>` : ''}
         <div class="grid grid-cols-2 gap-3">
-          <div class="min-w-0"><label class="lbl" for="fDate">Ημερομηνία</label>${dateField('fDate', ui.lastDate || today())}</div>
-          <div class="min-w-0"><label class="lbl" for="fNo">Αρ. Τιμολογίου</label><input id="fNo" class="inp" placeholder="π.χ. 4521"></div>
+          <div class="min-w-0 ${et === 'gen' ? 'col-span-2' : ''}"><label class="lbl" for="fDate">Ημερομηνία</label>${dateField('fDate', ui.lastDate || today())}</div>
+          ${et === 'gen' ? '<input id="fNo" type="hidden" value="">' : `<div class="min-w-0"><label class="lbl" for="fNo">Αρ. Τιμολογίου${et === 'oth' ? ' <span class="normal-case font-normal text-slate-400">(προαιρ.)</span>' : ''}</label><input id="fNo" class="inp" placeholder="π.χ. 4521"></div>`}
         </div>
         <div><label class="lbl" for="fSup">${K.party}</label>${supplierField('fSup', '', 'fAmt', k)}</div>
         <div class="grid grid-cols-2 gap-3">
@@ -1229,6 +1241,7 @@ function invRows(list, { showProject = true, showParty = true, partyClick = true
       <td class="whitespace-nowrap tabular-nums">${sel ? selCb(i) : ''}${dmy(i.date)}</td>
       <td class="text-slate-500 whitespace-nowrap hidden sm:table-cell">${esc(i.invNo) || '—'}</td>
       ${showParty ? `<td class="font-medium">${partyClick && i.kind === 'exp' ? `<button class="text-left hover:text-amber-700" title="Καρτέλα προμηθευτή" onclick="openSupplier('${encodeURIComponent(i.supName)}')">${esc(i.supName)}</button>` : esc(i.supName)}
+        ${i.kind === 'exp' && i.etype !== 'mat' ? `<div class="text-xs text-slate-400 font-normal">${esc(i.cat || etypeLabel(i.etype))}${i.etype === 'gen' ? ' · ' + (i.pay === 'card' ? 'κάρτα' : 'μετρητά') : ''}</div>` : ''}
         ${i.invNo ? `<div class="sm:hidden text-xs text-slate-400 font-normal">αρ. ${esc(i.invNo)}</div>` : ''}</td>` : ''}
       ${showProject ? `<td class="whitespace-nowrap hidden md:table-cell"><button class="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-full hover:ring-2 hover:ring-current/30 hover:underline" title="Άνοιγμα έργου" style="background:${p.color}1a;color:${p.color}" onclick="event.stopPropagation();openProject('${i.project}')">${dot(p.color, 1.5)}${esc(p.name)} ↗</button></td>` : ''}
       <td class="num font-semibold whitespace-nowrap ${i.kind === 'sal' ? 'text-emerald-700' : i.kind === 'thr' ? 'text-orange-600' : ''}">${fmt.format(i.amount)}</td>
@@ -1245,8 +1258,8 @@ function renderInvTable(keepFilters) {
   const K = KIND[ui.invKind], all = K.list();
   if (!keepFilters) {
     const counts = {}; all.forEach(i => counts[i.project] = (counts[i.project] || 0) + 1);
-    if (ui.invProject !== 'all' && !state.projects.some(p => p.id === ui.invProject)) ui.invProject = 'all';
-    $('#fltProj').innerHTML = `<option value="all">Όλα τα έργα (${all.length})</option>` +
+    if (ui.invProject !== 'all' && ui.invProject !== OFFICE && !state.projects.some(p => p.id === ui.invProject)) ui.invProject = 'all';
+    $('#fltProj').innerHTML = `<option value="all">Όλα τα έργα (${all.length})</option>` + (counts[OFFICE] ? `<option value="${OFFICE}" ${ui.invProject === OFFICE ? 'selected' : ''}>Γραφείο (${counts[OFFICE]})</option>` : '') +
       projSorted().map(p => `<option value="${p.id}" ${ui.invProject === p.id ? 'selected' : ''}>${esc(p.name)} (${counts[p.id] || 0})</option>`).join('');
     const months = [...new Set(all.map(i => ym(i.date)))].sort().reverse();
     if (ui.invMonth !== 'all' && !months.includes(ui.invMonth)) ui.invMonth = 'all';
@@ -1272,6 +1285,27 @@ function renderInvTable(keepFilters) {
   $('#invPager').innerHTML = moreBar(slice.length, list.length, 'ui.invShow+=15;renderInvTable(true)', 'ui.invShow=1e9;renderInvTable(true)');
 }
 function flash(sel) { const el = $(sel); if (!el) return; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+function expTypeHTML() {
+  return `<div class="inline-flex w-full gap-1 p-1 rounded-lg bg-slate-100">${ETYPES.map(([v, l]) => `<button type="button" class="flex-1 px-3 py-1.5 rounded-md text-sm font-medium ${ui.expType === v ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-900'}" onclick="ui.expType='${v}';render()">${l}</button>`).join('')}</div>`;
+}
+function expCatHTML() {
+  if (!expCats().includes(ui.expCat)) ui.expCat = expCats()[0];
+  return `<div><span class="lbl">Κατηγορία</span><div class="flex flex-wrap gap-1.5">${expCats().map(c => `<button type="button" class="px-3 py-1.5 rounded-lg border text-sm ${ui.expCat === c ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-700 hover:border-slate-400'}" onclick="ui.expCat=this.dataset.c;render()" data-c="${esc(c)}">${esc(c)}</button>`).join('')}
+    <button type="button" class="px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-sm text-slate-500 hover:text-slate-900" onclick="addExpCatModal()">＋ Κατηγορία</button></div></div>`;
+}
+function addExpCatModal() {
+  openModal(`<h3 class="text-lg font-bold mb-4">Νέα κατηγορία εξόδων</h3>
+    <form class="space-y-4" onsubmit="saveExpCat(event)"><input id="ecName" class="inp" required maxlength="40" placeholder="π.χ. Ενοίκιο εργοταξίου">
+      <div class="flex gap-2 justify-end"><button type="button" class="btn btn-ghost" onclick="closeModal()">Άκυρο</button><button class="btn btn-primary">Προσθήκη</button></div></form>`);
+  setTimeout(() => $('#ecName') && $('#ecName').focus(), 50);
+}
+function saveExpCat(e) {
+  e.preventDefault();
+  const name = $('#ecName').value.trim().replace(/\s+/g, ' '); if (!name) return;
+  const ex = expCats().find(c => norm(c) === norm(name));
+  if (!ex) commit([M('meta/expcats', { items: { [uid()]: { name } } })]);
+  ui.expCat = ex || name; closeModal(); render(); toast(ex ? 'Η κατηγορία υπάρχει ήδη' : `✓ Κατηγορία: ${name}`, ex ? 'warn' : 'ok');
+}
 function readInvForm(prefix) {
   const date = dmyToIso($('#' + prefix + 'Date').value);
   if (!date) { flash('#' + prefix + 'Date'); toast('Η ημερομηνία πρέπει να είναι σε μορφή ΗΗ/ΜΜ/ΕΕΕΕ, π.χ. 05/10/2026', 'err'); return null; }
@@ -1285,6 +1319,7 @@ function addInvoice(e) {
   e.preventDefault();
   const v = readInvForm('f'); if (!v) return;
   const c = { id: uid(), kind: ui.invKind, ...v };
+  if (c.kind === 'exp') Object.assign(c, { etype: ui.expType, cat: ui.expType === 'mat' ? '' : ui.expCat, pay: ui.expType === 'gen' ? ui.expPay : '' });
   const res = saveDoc(c); if (!res) return;
   ui.lastProj = v.project; ui.lastDate = v.date;
   ['#fNo', '#fSup', '#fAmt'].forEach(s => $(s).value = '');
@@ -1302,10 +1337,15 @@ function delInvoice(id) {
 function editInvoiceModal(id) {
   const i = findDoc(id); if (!i) return toast('Το τιμολόγιο δεν βρέθηκε', 'err');
   const K = KIND[i.kind];
-  const opts = projSorted().map(p => `<option value="${p.id}" ${p.id === i.project ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const opts = (i.kind === 'exp' ? `<option value="${OFFICE}" ${i.project === OFFICE ? 'selected' : ''}>Γραφείο</option>` : '') + projSorted().map(p => `<option value="${p.id}" ${p.id === i.project ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const sel = (id, list, cur) => `<select id="${id}" class="inp">${list.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const extra = i.kind === 'exp' ? `<div class="grid grid-cols-3 gap-3">
+      <div class="min-w-0"><label class="lbl" for="eType">Είδος</label>${sel('eType', ETYPES, i.etype)}</div>
+      <div class="min-w-0"><label class="lbl" for="eCat">Κατηγορία</label>${sel('eCat', [['', '—'], ...[...new Set([...expCats(), i.cat].filter(Boolean))].map(c => [c, c])], i.cat)}</div>
+      <div class="min-w-0"><label class="lbl" for="ePay">Πληρωμή</label>${sel('ePay', [['', '—'], ['cash', 'Μετρητά'], ['card', 'Κάρτα']], i.pay)}</div></div>` : '';
   openModal(`<h3 class="text-lg font-bold mb-1">${i.kind === 'sal' ? 'Τιμολόγιο πώλησης' : i.kind === 'thr' ? 'Τιμολόγιο προς τρίτους' : 'Επεξεργασία τιμολογίου'}</h3>
     <p class="text-sm text-slate-500 mb-5">Αν αλλάξεις έργο, το τιμολόγιο μεταφέρεται και τα σύνολα ενημερώνονται.</p>
-    <form class="space-y-3.5" onsubmit="saveInvoiceEdit(event,'${id}')">
+    <form class="space-y-3.5" onsubmit="saveInvoiceEdit(event,'${id}')">${extra}
       <div class="grid grid-cols-2 gap-3">
         <div class="min-w-0"><label class="lbl" for="eDate">Ημερομηνία</label>${dateField('eDate', i.date)}</div>
         <div class="min-w-0"><label class="lbl" for="eNo">Αρ. Τιμολογίου</label><input id="eNo" class="inp" value="${esc(i.invNo)}"></div>
@@ -1325,7 +1365,9 @@ function saveInvoiceEdit(e, id) {
   e.preventDefault();
   const old = findDoc(id); if (!old) { closeModal(); return; }
   const v = readInvForm('e'); if (!v) return;
-  const res = saveDoc({ id, kind: old.kind, ...v }, old); if (!res) return;
+  const c = { id, kind: old.kind, ...v };
+  if (old.kind === 'exp') { const t = $('#eType').value; Object.assign(c, { etype: t, cat: t === 'mat' ? '' : $('#eCat').value || old.cat || expCats()[0], pay: t === 'gen' ? $('#ePay').value || 'cash' : '' }); }
+  const res = saveDoc(c, old); if (!res) return;
   closeModal(); refreshViews();
   toast(v.project !== old.project ? `✓ Το τιμολόγιο μεταφέρθηκε στο ${proj(v.project).name}` : '✓ Το τιμολόγιο ενημερώθηκε');
 }
@@ -1927,8 +1969,8 @@ async function xlCommit() {
 function copyInvoices() {
   const list = filteredInvoices();
   if (!list.length) return toast('Δεν υπάρχουν δεδομένα για αντιγραφή', 'err');
-  const lines = [['Ημερομηνία', 'Αρ. Τιμολογίου', KIND[ui.invKind].party, 'Έργο', 'Αξία (€)'].join('\t')];
-  list.forEach(i => lines.push([dmy(i.date), i.invNo, i.supName, proj(i.project).name, xlNum(i.amount)].map(v => String(v).replace(/\t|\n/g, ' ')).join('\t')));
+  const lines = [['Ημερομηνία', 'Αρ. Τιμολογίου', KIND[ui.invKind].party, 'Έργο', 'Αξία (€)', 'Είδος'].join('\t')];
+  list.forEach(i => lines.push([dmy(i.date), i.invNo, i.supName, proj(i.project).name, xlNum(i.amount), i.kind === 'exp' ? (i.etype === 'mat' ? 'Υλικά' : [etypeLabel(i.etype), i.cat, i.etype === 'gen' ? (i.pay === 'card' ? 'κάρτα' : 'μετρητά') : ''].filter(Boolean).join(' · ')) : ''].map(v => String(v).replace(/\t|\n/g, ' ')).join('\t')));
   lines.push(['', '', '', 'ΣΥΝΟΛΟ', xlNum(list.reduce((a, i) => a + i.amount, 0))].join('\t'));
   copyText(lines.join('\n'), `Ο πίνακας (${list.length} τιμολόγια)`);
 }
@@ -3875,7 +3917,7 @@ function renderDataCounts() {
   el.innerHTML = chip(state.projects.length, 'έργα') + chip(state.invoices.length, 'τιμολόγια') + chip(state.workers.length, 'εργαζόμενοι') + chip(state.attendance.length, 'ημερομίσθια');
 }
 /* Έγγραφα ρυθμίσεων που μπαίνουν αυτούσια στο αντίγραφο (υπενθυμίσεις, αντιστοιχίες προμηθευτών, πρόσβαση, «το είδα») */
-const BACKUP_EXTRA = ['meta/reminders', 'meta/supalias', 'meta/links', 'meta/notif', 'meta/access'];
+const BACKUP_EXTRA = ['meta/reminders', 'meta/expcats', 'meta/supalias', 'meta/links', 'meta/notif', 'meta/access'];
 async function exportBackup(silent) {
   const data = { app: 'ergologio', version: 5, exportedAt: new Date().toISOString(),
     projects: state.projects, workers: state.workers, suppliers: state.suppliers.map(s => ({ name: s.name })),
@@ -3990,8 +4032,9 @@ function parseBackup(text) {
       payType: w.payType === 'salary' ? 'salary' : 'daily', cost: +w.cost || 0, salary: +w.salary || 0, created: +w.created || Date.now() + i }; });
   const suppliers = (d.suppliers || []).filter(s => s && s.name).map(s => ({ id: uid(), name: String(s.name).slice(0, 120) }));
   const okDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-  const invoices = d.invoices.filter(i => i && okDate(i.date) && pmap[i.project]).map(i => ({ id: validId(i.id) ? i.id : uid(), date: i.date,
-    invNo: String(i.invNo || '').slice(0, 40), supName: String(i.supName || '').slice(0, 120), amount: r2(+i.amount || 0), project: pmap[i.project] }));
+  const invoices = d.invoices.filter(i => i && okDate(i.date) && (pmap[i.project] || i.project === OFFICE)).map(i => ({ id: validId(i.id) ? i.id : uid(), date: i.date,
+    invNo: String(i.invNo || '').slice(0, 40), supName: String(i.supName || '').slice(0, 120), amount: r2(+i.amount || 0), project: i.project === OFFICE ? OFFICE : pmap[i.project],
+    etype: ['oth', 'gen'].includes(i.etype) ? i.etype : 'mat', cat: String(i.cat || '').slice(0, 40), pay: i.pay === 'card' ? 'card' : i.pay === 'cash' ? 'cash' : '' }));
   const attendance = (d.attendance || []).filter(a => a && okDate(a.date) && pmap[a.projectId] && a.workerId != null).map(a => ({
     date: a.date, workerId: wmap[a.workerId] || (validId(a.workerId) ? a.workerId : uid()), workerName: String(a.workerName || '—'), role: String(a.role || ''),
     projectId: pmap[a.projectId], payType: a.payType === 'salary' ? 'salary' : 'daily', salary: +a.salary || 0,
