@@ -293,7 +293,7 @@ const opSupplier = (id, v) => M('meta/suppliers', { items: { [id]: v } });
 const workerBody = w => ({ first: w.first || '', last: w.last || '', name: w.name, role: w.role || 'Εργατικό δυναμικό',
   payType: w.payType === 'salary' ? 'salary' : 'daily', cost: +w.cost || 0, salary: +w.salary || 0, created: w.created || Date.now() });
 const invBody = i => ({ date: i.date, invNo: i.invNo || '', supName: i.supName || '', amount: +i.amount,
-  etype: ['oth', 'gen'].includes(i.etype) ? i.etype : 'mat', cat: i.etype === 'oth' || i.etype === 'gen' ? i.cat || '' : '', pay: i.etype === 'gen' ? (i.pay === 'card' ? 'card' : 'cash') : '' });
+  etype: ['oth', 'gen'].includes(i.etype) ? i.etype : 'mat', cat: i.etype === 'oth' || i.etype === 'gen' ? i.cat || '' : '', pay: i.etype === 'gen' ? (i.pay === 'card' ? 'card' : 'cash') : '', mark: i.mark || '' });
 /* Είδη αγορών: Υλικά · Άλλα (με κατηγορία) · Γενικά έξοδα (χωρίς τιμολόγιο, μετρητά ή κάρτα). Έργο «Γραφείο» = έξοδο εταιρείας, όχι έργου. */
 const OFFICE = 'office';
 const ETYPES = [['mat', 'Υλικά'], ['oth', 'Άλλα'], ['gen', 'Γενικά έξοδα']];
@@ -366,7 +366,7 @@ function rebuild0() {
   for (const [path, d] of Object.entries(docs)) {
     if (!d) continue;
     if (path.startsWith('inv/')) {
-      for (const [id, v] of Object.entries(d.items || {})) if (v) invoices.push({ id, kind: 'exp', project: d.project, date: v.date, invNo: v.invNo || '', supName: v.supName || '', amount: +v.amount || 0, etype: ['oth', 'gen'].includes(v.etype) ? v.etype : 'mat', cat: v.cat || '', pay: v.pay || '' });
+      for (const [id, v] of Object.entries(d.items || {})) if (v) invoices.push({ id, kind: 'exp', project: d.project, date: v.date, invNo: v.invNo || '', supName: v.supName || '', amount: +v.amount || 0, etype: ['oth', 'gen'].includes(v.etype) ? v.etype : 'mat', cat: v.cat || '', pay: v.pay || '', mark: v.mark || '' });
     } else if (path.startsWith('car/')) {
       for (const [id, v] of Object.entries(d.items || {})) if (v) carExp.push({ id, carId: d.car, ...v, amount: +v.amount || 0, liters: +v.liters || 0 });
     } else if (path.startsWith('sal/')) {
@@ -1153,7 +1153,7 @@ function invoicesHTML() {
   const tab = (key, label, sub) => `<button class="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-semibold transition ${k === key ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-900'}"
       onclick="ui.invKind='${key}';ui.invShow=15;ui.invSupplier='';render()">${label} <span class="font-normal text-xs ${k === key ? 'text-slate-500' : 'text-slate-400'}">· ${sub} (${KIND[key].list().length})</span></button>`;
   return pageHeader('Τιμολόγια', 'Αγορές από προμηθευτές (έξοδα), πωλήσεις σε πελάτες (έσοδα) και τιμολόγια προς τρίτους (έξοδα) ανά έργο',
-    `<label class="btn btn-ghost cursor-pointer">📊 Εισαγωγή από Excel<input type="file" accept=".xlsx,.xls,.csv" class="hidden" onchange="xlImportFile(this.files[0]);this.value=''"></label>`) + `
+    `${k === 'exp' ? '<button class="btn btn-ghost" onclick="mdCheckModal()">🔎 Έλεγχος myDATA <span class="text-[10px] font-bold text-slate-400">DEMO</span></button>' : ''}<label class="btn btn-ghost cursor-pointer">📊 Εισαγωγή από Excel<input type="file" accept=".xlsx,.xls,.csv" class="hidden" onchange="xlImportFile(this.files[0]);this.value=''"></label>`) + `
   <div id="pendPanel"></div>
   <div class="inline-flex w-full sm:w-auto gap-1 p-1 rounded-xl bg-slate-200/70 mb-5">${tab('exp', 'Αγορές', 'έξοδα')}${tab('sal', 'Πωλήσεις', 'έσοδα')}${tab('thr', 'Προς τρίτους', 'έξοδα')}</div>
   <div class="grid xl:grid-cols-[380px_1fr] gap-6 items-start">
@@ -1311,6 +1311,111 @@ function saveExpCat(e) {
   if (!ex) commit([M('meta/expcats', { items: { [uid()]: { name } } })]);
   ui.expCat = ex || name; closeModal(); render(); toast(ex ? 'Η κατηγορία υπάρχει ήδη' : `✓ Κατηγορία: ${name}`, ex ? 'warn' : 'ok');
 }
+/* ============ ΕΛΕΓΧΟΣ myDATA (DEMO) ============
+   Δεν συνδέεται με την ΑΑΔΕ. Τα «παραστατικά myDATA» είναι εικονικά: φτιάχνονται από τα τιμολόγια αγορών της περιόδου,
+   με μερικά να λείπουν, μερικά με διαφορά και μερικά επιπλέον (ακαταχώρητα). Ίδια περίοδος → ίδια εικονικά δεδομένα. */
+const md = { from: '', to: '', open: {}, res: null };
+const mdRng = seed => { let h = 2166136261; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; }; };
+const mdMark = r => '4' + String(Math.floor(r() * 1e14)).padStart(14, '0');
+const mdVat = name => { let h = 0; for (const c of norm(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return String(800000000 + h % 199999999); };
+const MD_EXTRA = [['Ταβέρνα Το Λιμάνι', 38, 140], ['Ξενοδοχείο Ακτή Ρίου', 90, 420], ['Shell Ελλάς Α.Ε.', 40, 95], ['Αττική Οδός Α.Ε.', 15, 60], ['Kotsovolos', 120, 900], ['Γαλαξίας Super Market', 12, 80], ['Blue Star Ferries', 60, 310]];
+function mdDemoDocs(from, to) {
+  // επιπλέον (ακαταχώρητα): σταθερά για την περίοδο, ανεξάρτητα από ό,τι καταχωρείς
+  const rx = mdRng('x|' + from + '|' + to), days = Math.max(1, Math.round((new Date(to) - new Date(from)) / 864e5)), extra = 3 + Math.floor(rx() * 4), docs = [];
+  for (let k = 0; k < extra; k++) { const [name, lo, hi] = MD_EXTRA[Math.floor(rx() * MD_EXTRA.length)];
+    docs.push({ mark: mdMark(rx), vat: mdVat(name), name, no: 'Α-' + (Math.floor(rx() * 90000) + 10000), date: addDays(from, Math.floor(rx() * (days + 1))), net: r2(lo + rx() * (hi - lo)) }); }
+  const extraMarks = new Set(docs.map(d => d.mark));
+  // από τα δικά σου τιμολόγια: σταθερά ανά τιμολόγιο· όσα ήρθαν από myDATA (έχουν ΜΑΡΚ) δεν αλλοιώνονται
+  state.invoices.filter(i => i.date >= from && i.date <= to && !extraMarks.has(i.mark)).forEach(i => {
+    const r = mdRng('i|' + i.id), x = i.mark ? 0.5 : r(); if (x < 0.07) return;            // υπάρχει μόνο στο σύστημα
+    let net = i.amount, date = i.date;
+    if (x > 0.93) net = r2(net * (r() < 0.5 ? 1.1 : 0.9)); else if (x > 0.89) date = addDays(date, r() < 0.5 ? -2 : 3);   // διαφορά ποσού / ημερομηνίας
+    docs.push({ mark: i.mark || mdMark(r), vat: mdVat(i.supName), name: i.supName, no: i.invNo || String(Math.floor(r() * 9000) + 1000), date, net, refId: i.id });
+  });
+  docs.forEach(d => { d.vatAmt = r2(d.net * 0.24); d.total = r2(d.net + d.vatAmt); });
+  return docs.filter(d => d.date >= from && d.date <= to);
+}
+function mdCompare(from, to) {
+  const docs = mdDemoDocs(from, to), mine = state.invoices.filter(i => i.date >= from && i.date <= to), used = new Set(), out = { ok: [], missing: [], onlyMine: [], diff: [] };
+  docs.forEach(d => {
+    const i = mine.find(x => !used.has(x.id) && x.mark && x.mark === d.mark)
+      || mine.find(x => !used.has(x.id) && (x.id === d.refId || (norm(x.supName) === norm(d.name) && noKey(x.invNo) && noKey(x.invNo) === noKey(d.no))))
+      || mine.find(x => !used.has(x.id) && norm(x.supName) === norm(d.name) && x.date === d.date && Math.abs(x.amount - d.net) < 0.01);
+    if (!i) return out.missing.push(d);
+    used.add(i.id);
+    (Math.abs(i.amount - d.net) >= 0.01 || i.date !== d.date ? out.diff : out.ok).push({ d, i });
+  });
+  mine.forEach(i => { if (!used.has(i.id)) out.onlyMine.push(i); });
+  return out;
+}
+function mdCheckModal() {
+  if (!md.from) { md.to = today(); md.from = addDays(md.to, -30); }
+  openModal(`<div id="mdBox"><div class="flex items-start justify-between gap-3 mb-1"><h3 class="text-lg font-bold">Έλεγχος με το myDATA <span class="ml-1 align-middle rounded bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5">DEMO</span></h3>
+      <button class="text-slate-400 hover:text-slate-900 text-xl leading-none" aria-label="Κλείσιμο" onclick="closeModal()">×</button></div>
+    <p class="text-xs text-slate-500 mb-4">Δοκιμαστική λειτουργία με εικονικά παραστατικά· δεν γίνεται σύνδεση με την ΑΑΔΕ.</p>
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="w-40"><label class="lbl" for="mdFrom">Από</label>${dateField('mdFrom', md.from)}</div>
+      <div class="w-40"><label class="lbl" for="mdTo">Έως</label>${dateField('mdTo', md.to)}</div>
+      <button class="btn btn-primary" onclick="mdRun()">Έλεγχος</button></div>
+    <div id="mdRes" class="mt-5"></div></div>`, true);
+  if (md.res) mdRender();
+}
+function mdRun() {
+  const from = dmyToIso($('#mdFrom').value), to = dmyToIso($('#mdTo').value);
+  if (!from || !to || from > to) return toast('Διάλεξε σωστή περίοδο (ΗΗ/ΜΜ/ΕΕΕΕ)', 'err');
+  Object.assign(md, { from, to, res: mdCompare(from, to), open: {} }); mdRender();
+}
+function mdRender() {
+  const el = $('#mdRes'); if (!el || !md.res) return;
+  const R = md.res, sum = l => l.reduce((s, x) => s + x, 0);
+  const docRow = (d, btn) => `<div class="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] sm:grid-cols-[5.5rem_minmax(0,1fr)_7rem_6rem_auto] gap-3 items-center px-3 py-2 text-sm border-t border-slate-100">
+      <span class="tabular-nums text-slate-500">${dmy(d.date)}</span>
+      <span class="min-w-0"><span class="block truncate">${esc(d.name)}</span><span class="block text-xs text-slate-400 truncate">${esc(d.no)} · ΑΦΜ ${d.vat} · ΜΑΡΚ ${d.mark}</span></span>
+      <span class="num hidden sm:block">${fmt.format(d.net)}</span><span class="num hidden sm:block text-xs text-slate-500">ΦΠΑ ${fmt.format(d.vatAmt)}</span>${btn || '<span></span>'}</div>`;
+  const myRow = i => `<div class="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] gap-3 items-center px-3 py-2 text-sm border-t border-slate-100">
+      <span class="tabular-nums text-slate-500">${dmy(i.date)}</span><span class="min-w-0 truncate">${esc(i.supName)}${i.invNo ? ` <span class="text-xs text-slate-400">· ${esc(i.invNo)}</span>` : ''}</span><span class="num">${fmt.format(i.amount)}</span></div>`;
+  const diffRow = ({ d, i }) => `<div class="px-3 py-2 text-sm border-t border-slate-100"><div class="flex gap-3"><span class="min-w-0 flex-1 truncate">${esc(d.name)} <span class="text-xs text-slate-400">· ${esc(d.no)}</span></span></div>
+      <div class="text-xs text-slate-500 mt-0.5">${i.date !== d.date ? `Ημ/νία: σύστημα ${dmy(i.date)} · myDATA <b class="text-slate-900">${dmy(d.date)}</b>` : ''}${i.date !== d.date && Math.abs(i.amount - d.net) >= 0.01 ? ' · ' : ''}${Math.abs(i.amount - d.net) >= 0.01 ? `Καθαρή αξία: σύστημα ${fmt.format(i.amount)} · myDATA <b class="text-slate-900">${fmt.format(d.net)}</b>` : ''}
+      <button class="ml-2 underline text-slate-700" onclick="closeModal();editInvoiceModal('${i.id}')">Διόρθωση</button></div></div>`;
+  const grp = (k, icon, label, n, total, body) => { const open = !!md.open[k];
+    return `<div class="rounded-xl border border-slate-200 overflow-hidden mb-2">
+      <button class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50" onclick="md.open['${k}']=!md.open['${k}'];mdRender()">
+        <span class="text-slate-400 w-3 transition-transform ${open ? 'rotate-90' : ''}">▸</span><span class="w-4 text-center">${icon}</span><span class="font-semibold">${label}</span>
+        <span class="text-sm text-slate-500">${n}</span><span class="ml-auto num whitespace-nowrap">${fmt.format(total)}</span></button>
+      ${open ? `<div class="max-h-72 overflow-y-auto">${n ? body : '<div class="px-4 py-3 text-sm text-slate-400 border-t border-slate-100">Τίποτα.</div>'}</div>` : ''}</div>`; };
+  el.innerHTML = `<p class="text-sm text-slate-600 mb-3">Περίοδος ${dmy(md.from)} – ${dmy(md.to)}</p>` +
+    grp('ok', '✓', 'Ταυτισμένα', R.ok.length, sum(R.ok.map(x => x.i.amount)), R.ok.map(x => docRow(x.d)).join('')) +
+    grp('missing', '⚠', 'Στο myDATA, όχι στο σύστημα', R.missing.length, sum(R.missing.map(d => d.net)), R.missing.map(d => docRow(d, `<button class="btn btn-ghost !py-1 !px-2.5 !text-xs" onclick="mdRegister('${d.mark}')">Καταχώριση</button>`)).join('')) +
+    grp('onlyMine', '⚠', 'Στο σύστημα, όχι στο myDATA', R.onlyMine.length, sum(R.onlyMine.map(i => i.amount)), R.onlyMine.map(myRow).join('')) +
+    grp('diff', '⚠', 'Με διαφορά ποσού ή ημερομηνίας', R.diff.length, sum(R.diff.map(x => x.d.net)), R.diff.map(diffRow).join(''));
+}
+/* Καταχώριση ακαταχώρητου: φόρμα προσυμπληρωμένη· διαλέγεις μόνο είδος/κατηγορία και έργο */
+function mdRegister(mark) {
+  const d = md.res && md.res.missing.find(x => x.mark === mark); if (!d) return;
+  const known = state.suppliers.find(sp => norm(sp.name) === norm(d.name));
+  const opts = `<option value="">— Επίλεξε έργο —</option><option value="${OFFICE}">Γραφείο</option>` + projSorted().map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  openModal(`<h3 class="text-lg font-bold mb-1">Καταχώριση από myDATA <span class="ml-1 align-middle rounded bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5">DEMO</span></h3>
+    <div class="rounded-lg bg-slate-50 p-3 text-sm my-4 space-y-0.5">
+      <div class="font-semibold">${esc(known ? known.name : d.name)} <span class="font-normal text-slate-500">· ΑΦΜ ${d.vat}</span></div>
+      <div class="text-slate-600">${dmy(d.date)} · αρ. ${esc(d.no)} · ΜΑΡΚ ${d.mark}</div>
+      <div class="text-slate-600">Καθαρή ${fmt.format(d.net)} · ΦΠΑ ${fmt.format(d.vatAmt)} · Σύνολο <b class="text-slate-900">${fmt.format(d.total)}</b></div></div>
+    <form class="space-y-3.5" onsubmit="mdSave(event,'${mark}')">
+      <div><label class="lbl" for="mrType">Είδος</label><select id="mrType" class="inp" onchange="$('#mrCatBox').classList.toggle('hidden',this.value==='mat')"><option value="mat">Υλικά</option><option value="oth">Άλλα</option></select></div>
+      <div id="mrCatBox" class="hidden"><label class="lbl" for="mrCat">Κατηγορία</label><select id="mrCat" class="inp">${expCats().map(c => `<option>${esc(c)}</option>`).join('')}</select></div>
+      <div><label class="lbl" for="mrProj">Έργο</label><select id="mrProj" class="inp" required>${opts}</select></div>
+      <div class="flex gap-2 justify-end pt-1"><button type="button" class="btn btn-ghost" onclick="mdCheckModal()">Πίσω</button><button class="btn btn-primary">Καταχώριση</button></div>
+    </form>`);
+}
+function mdSave(e, mark) {
+  e.preventDefault();
+  const d = md.res && md.res.missing.find(x => x.mark === mark); if (!d) return mdCheckModal();
+  const project = $('#mrProj').value; if (!project) { flash('#mrProj'); return toast('Διάλεξε έργο ή Γραφείο', 'err'); }
+  const etype = $('#mrType').value, known = state.suppliers.find(sp => norm(sp.name) === norm(d.name));
+  const c = { id: uid(), kind: 'exp', date: d.date, invNo: d.no, supName: known ? known.name : d.name, amount: d.net, project, etype, cat: etype === 'mat' ? '' : $('#mrCat').value, pay: '', mark: d.mark };
+  const res = saveDoc(c); if (!res) return;
+  md.res.missing = md.res.missing.filter(x => x.mark !== mark); md.res.ok.push({ d, i: c });
+  renderInvTable(); mdCheckModal(); toast(`✓ Καταχωρήθηκε: ${c.supName} · ${fmt.format(c.amount)}`);
+}
 function readInvForm(prefix) {
   const date = dmyToIso($('#' + prefix + 'Date').value);
   if (!date) { flash('#' + prefix + 'Date'); toast('Η ημερομηνία πρέπει να είναι σε μορφή ΗΗ/ΜΜ/ΕΕΕΕ, π.χ. 05/10/2026', 'err'); return null; }
@@ -1371,7 +1476,7 @@ function saveInvoiceEdit(e, id) {
   const old = findDoc(id); if (!old) { closeModal(); return; }
   const v = readInvForm('e'); if (!v) return;
   const c = { id, kind: old.kind, ...v };
-  if (old.kind === 'exp') { const t = $('#eType').value; Object.assign(c, { etype: t, cat: t === 'mat' ? '' : $('#eCat').value || old.cat || expCats()[0], pay: t === 'gen' ? $('#ePay').value || 'cash' : '' }); }
+  if (old.kind === 'exp') { const t = $('#eType').value; Object.assign(c, { etype: t, cat: t === 'mat' ? '' : $('#eCat').value || old.cat || expCats()[0], pay: t === 'gen' ? $('#ePay').value || 'cash' : '', mark: old.mark || '' }); }
   const res = saveDoc(c, old); if (!res) return;
   closeModal(); refreshViews();
   toast(v.project !== old.project ? `✓ Το τιμολόγιο μεταφέρθηκε στο ${proj(v.project).name}` : '✓ Το τιμολόγιο ενημερώθηκε');
@@ -4133,7 +4238,7 @@ function parseBackup(text) {
   const okDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
   const invoices = d.invoices.filter(i => i && okDate(i.date) && (pmap[i.project] || i.project === OFFICE)).map(i => ({ id: validId(i.id) ? i.id : uid(), date: i.date,
     invNo: String(i.invNo || '').slice(0, 40), supName: String(i.supName || '').slice(0, 120), amount: r2(+i.amount || 0), project: i.project === OFFICE ? OFFICE : pmap[i.project],
-    etype: ['oth', 'gen'].includes(i.etype) ? i.etype : 'mat', cat: String(i.cat || '').slice(0, 40), pay: i.pay === 'card' ? 'card' : i.pay === 'cash' ? 'cash' : '' }));
+    etype: ['oth', 'gen'].includes(i.etype) ? i.etype : 'mat', cat: String(i.cat || '').slice(0, 40), pay: i.pay === 'card' ? 'card' : i.pay === 'cash' ? 'cash' : '', mark: /^\d{1,20}$/.test(i.mark || '') ? i.mark : '' }));
   const attendance = (d.attendance || []).filter(a => a && okDate(a.date) && pmap[a.projectId] && a.workerId != null).map(a => ({
     date: a.date, workerId: wmap[a.workerId] || (validId(a.workerId) ? a.workerId : uid()), workerName: String(a.workerName || '—'), role: String(a.role || ''),
     projectId: pmap[a.projectId], payType: a.payType === 'salary' ? 'salary' : 'daily', salary: +a.salary || 0,
