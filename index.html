@@ -3456,7 +3456,7 @@ function transportCost(p, recs, m = '') {
   const perDay = {}; recs.forEach(a => { if (!m || a.date.startsWith(m)) perDay[a.date] = (perDay[a.date] || 0) + 1; });
   const cars = Object.values(perDay).reduce((s, n) => s + Math.ceil(n / TR_SEATS), 0), carCost = carPrice ? cars * carPrice : 0;
   const tickets = Object.entries(t.tickets || {}).filter(([, v]) => v && (!m || (v.date || '').startsWith(m))).map(([id, v]) => ({ id, ...v, total: r2((+v.count || 0) * (+v.price || 0)) }));
-  const ferry = tickets.filter(x => x.type === 'ferry'), air = tickets.filter(x => x.type === 'air');
+  void tickets; const ferry = [], air = [];   // εισιτήρια: πλέον στις Αγορές → Άλλα· τα παλιά δεν μετράνε εδώ
   const sum = l => l.reduce((s, x) => s + x.total, 0), ferryCost = sum(ferry), airCost = sum(air);
   return { carPrice, days: Object.keys(perDay).length, cars, carCost, ferry, air, ferryCost, airCost, total: carCost + ferryCost + airCost, perDay };
 }
@@ -3467,7 +3467,7 @@ KIND.ferry = { list: () => typeTickets('ferry').map(v => ({ supName: v.note })),
 KIND.air = { list: () => typeTickets('air').map(v => ({ supName: v.note })), parties: () => uniqNames([...typeTickets('air').map(v => v.note), ...AIR_DEFAULTS]), partyNew: 'Νέα αεροπορική', partyPl: 'αεροπορικές', unit: 'φορές' };
 function transportModal(pid, tab) {
   const p = state.projects.find(x => x.id === pid); if (!p) return;
-  if (tab) ui.trTab = tab; const tb = ui.trTab || 'car';
+  const tb = 'car';
   const tc = transportCost(p, state.attendance.filter(a => a.projectId === pid));
   const tabBtn = (k, label, val) => `<button type="button" class="flex-1 rounded-lg px-2 py-2 text-sm font-semibold transition ${tb === k ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-800'}" onclick="transportModal('${pid}','${k}')">${label}<span class="block text-[11px] font-medium tabular-nums ${tb === k ? 'text-slate-500' : 'text-slate-400'}">${fmt.format(val)}</span></button>`;
   let body;
@@ -3503,7 +3503,6 @@ function transportModal(pid, tab) {
   }
   openModal(`<h3 class="text-lg font-bold mb-1">Κόστος μεταφοράς · ${esc(p.name)}</h3>
     <p class="text-sm text-slate-500 mb-4">Σύνολο μεταφοράς: <b class="text-slate-900 tabular-nums">${fmt.format(tc.total)}</b> · μετράει στο κόστος του έργου.</p>
-    <div class="flex gap-1 rounded-xl bg-slate-100 p-1 mb-4">${tabBtn('car', '🚐 Αμάξι', tc.carCost)}${tabBtn('ferry', '⛴ Ακτοπλοϊκά', tc.ferryCost)}${tabBtn('air', '✈ Αεροπορικά', tc.airCost)}</div>
     ${body}
     <div class="flex justify-end pt-4"><button type="button" class="btn btn-ghost" onclick="closeModal()">Κλείσιμο</button></div>`);
   setTimeout(() => { const f = $(tb === 'car' ? '#trCar' : '#tkNote'); f && f.focus(); }, 50);
@@ -3527,9 +3526,8 @@ function transportCalcModal(pid) {
     ${days.length ? `<div class="max-h-[34vh] overflow-y-auto mb-4 border border-slate-100 rounded-xl"><table class="tbl w-full text-sm"><thead><tr>${dTh('trday', `transportCalcModal('${pid}')`, 'Ημέρα')}<th class="num">Άτομα</th><th class="num">Αμάξια</th><th class="num">Κόστος</th></tr></thead><tbody>
       ${days.map(([d, n]) => { const c = Math.ceil(n / TR_SEATS); return `<tr><td class="tabular-nums whitespace-nowrap">${dmy(d)}</td><td class="num">${n}</td><td class="num">${n} ÷ ${TR_SEATS} → <b>${c}</b></td><td class="num whitespace-nowrap">${cp ? fmt.format(c * cp) : '—'}</td></tr>`; }).join('')}
       </tbody><tfoot><tr class="bg-slate-50"><td class="font-bold">Σύνολο</td><td class="num font-bold">${ppl}</td><td class="num font-bold">${tc.cars}</td><td class="num font-extrabold whitespace-nowrap">${fmt.format(tc.carCost)}</td></tr></tfoot></table></div>` : ''}
-    ${tc.ferry.length || tc.air.length ? `<div class="mb-4 text-sm">${tkList(tc.ferry, TR_TYPES.ferry)}${tkList(tc.air, TR_TYPES.air)}</div>` : ''}
     <div class="border-t border-slate-200 pt-2 text-sm">
-      ${line('🚐 Αμάξι', fmt.format(tc.carCost))}${line('⛴ Ακτοπλοϊκά', fmt.format(tc.ferryCost))}${line('✈ Αεροπορικά', fmt.format(tc.airCost))}
+      ${line('🚐 Αμάξι', fmt.format(tc.carCost))}
       ${line('Σύνολο μεταφοράς', fmt.format(tc.total), true)}
     </div>
     <div class="flex justify-end gap-2 pt-4"><button class="btn btn-ghost" onclick="closeModal()">Κλείσιμο</button><button class="btn btn-primary" onclick="transportModal('${pid}')">✎ Επεξεργασία</button></div>`);
@@ -3740,7 +3738,6 @@ function renderProject() {
         ${st('Τιμολόγια πωλήσεων', sals.length, fmt.format(revenue))}
         ${st('Τιμολόγια προς τρίτους', thrs.length, fmt.format(thr))}
         ${st('Μεταφορές με αμάξι', tc.cars, tc.carPrice ? '× ' + fmt.format(tc.carPrice) : 'χωρίς τιμή')}
-        ${st('Εισιτήρια', tk, tk ? fmt.format(tc.ferryCost + tc.airCost) : '')}
       </div>`; })());
 }
 function copyProjectInvoices() {
