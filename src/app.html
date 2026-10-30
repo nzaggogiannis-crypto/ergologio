@@ -2120,7 +2120,7 @@ function workerModal(id) {
         <div class="flex gap-1.5 mt-2 flex-wrap">${[80, 95, 110, 130].map(c => `<button type="button" class="btn btn-ghost !py-1 !px-2.5 !text-xs" onclick="$('#wCost').value=${c}">${c} €</button>`).join('')}</div></div>
       <div id="wSalaryBox" ${sal ? '' : 'hidden'}><label class="lbl" for="wSalary">Μηνιαίο κόστος μισθού (€/μήνα)</label><input id="wSalary" type="text" inputmode="decimal" autocomplete="off" step="0.01" min="1" class="inp" value="${decStr(w.salary || '')}">
         <p class="text-[11px] text-slate-400 mt-1">Σταθερό κάθε μήνα. Σε κάθε έργο χρεώνεται ημερήσιο κόστος = μισθός ÷ εργάσιμες ημέρες (Δευ–Παρ) του μήνα.</p></div>
-      ${id ? `<p class="text-xs text-slate-400">Οι αλλαγές στην αμοιβή ισχύουν για νέες παρουσίες· οι παλιές κρατούν ό,τι είχαν.</p>` : ''}
+      ${id ? `<p class="text-xs text-slate-400">Αν αλλάξεις την αμοιβή, θα σε ρωτήσει πού να εφαρμοστεί.</p>` : ''}
       <div class="flex gap-2 justify-end pt-2"><button type="button" class="btn btn-ghost" onclick="closeModal()">Άκυρο</button><button class="btn btn-primary">Αποθήκευση</button></div>
     </form>`);
   setTimeout(() => $('#wFirst') && $('#wFirst').focus(), 50);
@@ -2154,8 +2154,58 @@ function saveWorker(e, id) {
   const roleEl = document.querySelector('input[name=wRole]:checked');
   const data = workerBody({ first, last, name: `${first} ${last}`.trim(), role: roleEl ? roleEl.value : CATEGORIES[0], payType,
     cost: payType === 'daily' ? cost : 0, salary: payType === 'salary' ? salary : 0, created: old ? old.created : Date.now() });
+  const payChanged = old && (old.payType !== data.payType || old.cost !== data.cost || old.salary !== data.salary);
+  if (payChanged && state.attendance.some(a => a.workerId === id)) return payScopeModal(id, data);
   commit([opWorker(id || uid(), data)]);
   closeModal(); render(); toast(id ? '✓ Ο εργαζόμενος ενημερώθηκε' : `✓ Προστέθηκε: ${data.name}`);
+}
+/* Αλλαγή αμοιβής: πού εφαρμόζεται στις μέρες που έχουν ήδη καταχωρηθεί (τα έξτρα δεν αλλάζουν) */
+let payScope = null;
+const payTxt = w => w.payType === 'salary' ? `μισθός ${money0.format(w.salary)}/μήνα` : `μεροκάματο ${fmt.format(w.cost)}`;
+function payScopeModal(id, data) {
+  const old = state.workers.find(w => w.id === id);
+  payScope = { id, data, mode: 'future' };
+  openModal(`<h3 class="text-lg font-bold mb-1">Πού να εφαρμοστεί η αλλαγή;</h3>
+    <p class="text-sm text-slate-500 mb-4">${esc(data.name)}: ${payTxt(old)} → <b class="text-slate-900">${payTxt(data)}</b></p>
+    <div class="space-y-2" onchange="payScopeChanged()">
+      ${[['future', 'Από σήμερα και μετά', 'Οι μέρες πριν από σήμερα κρατούν την παλιά τιμή.'], ['all', 'Διόρθωση σε όλες τις μέρες', 'Αλλάζουν και όλες οι μέρες που έχουν ήδη καταχωρηθεί.'], ['range', 'Σε διάστημα', 'Μόνο οι μέρες από – έως.']]
+        .map(([v, l, d], i) => `<label class="flex gap-3 rounded-lg border border-slate-200 px-3 py-2.5 cursor-pointer has-[:checked]:border-slate-900">
+          <input type="radio" name="psMode" value="${v}" class="mt-1 accent-slate-900" ${i ? '' : 'checked'}><span><span class="font-medium">${l}</span><span class="block text-xs text-slate-500">${d}</span></span></label>`).join('')}
+    </div>
+    <div id="psRange" class="hidden grid-cols-2 gap-3 mt-3">
+      <div class="min-w-0"><label class="lbl" for="psFrom">Από</label>${dateField('psFrom', ym(today()) + '-01', 'payScopeChanged')}</div>
+      <div class="min-w-0"><label class="lbl" for="psTo">Έως</label>${dateField('psTo', today(), 'payScopeChanged')}</div>
+    </div>
+    <p id="psPreview" class="text-sm text-slate-600 mt-4"></p>
+    <p class="text-xs text-slate-400 mt-1">Τα έξτρα (υπερωρίες κ.λπ.) δεν αλλάζουν.</p>
+    <div class="flex gap-2 justify-end mt-5"><button class="btn btn-ghost" onclick="closeModal()">Άκυρο</button><button class="btn btn-primary" onclick="applyPayScope()">Εφαρμογή</button></div>`);
+  payScopeChanged();
+}
+function payScopeDays() {
+  const { id, mode } = payScope, t = today();
+  const from = mode === 'future' ? t : mode === 'range' ? dmyToIso($('#psFrom').value) : '';
+  const to = mode === 'range' ? dmyToIso($('#psTo').value) : '';
+  if (mode === 'range' && (!from || !to)) return null;
+  return state.attendance.filter(a => a.workerId === id && (!from || a.date >= from) && (!to || a.date <= to));
+}
+const newDayCost = (d, a) => d.payType === 'salary' ? r2(d.salary / workdaysIn(ym(a.date))) : d.cost;
+function payScopeChanged() {
+  if (!payScope) return;
+  const m = document.querySelector('input[name=psMode]:checked'); payScope.mode = m ? m.value : 'future';
+  $('#psRange').classList.toggle('hidden', payScope.mode !== 'range'); $('#psRange').classList.toggle('grid', payScope.mode === 'range');
+  const list = payScopeDays(), el = $('#psPreview'); if (!el) return;
+  if (!list) { el.textContent = 'Συμπλήρωσε τις ημερομηνίες (ΗΗ/ΜΜ/ΕΕΕΕ).'; return; }
+  const diff = list.reduce((s, a) => s + newDayCost(payScope.data, a) - a.cost, 0);
+  el.innerHTML = list.length ? `Αλλάζουν <b class="text-slate-900">${list.length}</b> ${list.length === 1 ? 'μέρα' : 'μέρες'} που έχουν ήδη καταχωρηθεί · κόστος <b class="${diff > 0 ? 'text-rose-600' : diff < 0 ? 'text-emerald-700' : 'text-slate-900'}">${diff > 0 ? '+' : ''}${fmt.format(diff)}</b>`
+    : 'Δεν αλλάζει καμία μέρα που έχει ήδη καταχωρηθεί· η νέα αμοιβή ισχύει για τις επόμενες καταχωρίσεις.';
+}
+function applyPayScope() {
+  const list = payScopeDays(); if (!list) return toast('Συμπλήρωσε τις ημερομηνίες (ΗΗ/ΜΜ/ΕΕΕΕ)', 'err');
+  const { id, data } = payScope, byDoc = {};
+  list.forEach(a => { (byDoc[attDocPath(a.date)] ??= {})[attKey(a.date, a.workerId)] = attBody({ ...a, payType: data.payType, salary: data.salary, cost: data.payType === 'daily' ? data.cost : 0 }); });
+  commit([opWorker(id, data), ...Object.entries(byDoc).map(([p, items]) => M(p, { items }))]);
+  payScope = null; closeModal(); render();
+  toast(`✓ Ενημερώθηκε${list.length ? ` · ${list.length} ${list.length === 1 ? 'μέρα' : 'μέρες'} με τη νέα αμοιβή` : ''}`);
 }
 function delWorker(id) {
   const w = state.workers.find(x => x.id === id); if (!w) return;
